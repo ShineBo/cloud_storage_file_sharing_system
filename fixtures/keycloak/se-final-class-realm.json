@@ -1,0 +1,167 @@
+{
+  "realm": "se-final-class",
+  "displayName": "Software Engineering Class Fixtures",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "groups": [
+    {
+      "name": "project-team"
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "firstName": "Alice",
+      "lastName": "Example",
+      "email": "alice@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "3b57ee12-c922-430c-9cbc-000000000001",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "bob",
+      "firstName": "Bob",
+      "lastName": "Example",
+      "email": "bob@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "groups": [
+        "/project-team"
+      ],
+      "id": "3b57ee12-c922-430c-9cbc-000000000002",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "priya",
+      "firstName": "Priya",
+      "lastName": "Example",
+      "email": "priya@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "groups": [
+        "/project-team"
+      ],
+      "id": "3b57ee12-c922-430c-9cbc-000000000003",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "casey",
+      "firstName": "Casey",
+      "lastName": "Example",
+      "email": "casey@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "3b57ee12-c922-430c-9cbc-000000000004",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "dana",
+      "firstName": "Dana",
+      "lastName": "Example",
+      "email": "dana@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "3b57ee12-c922-430c-9cbc-000000000005",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "eve",
+      "firstName": "Eve",
+      "lastName": "Example",
+      "email": "eve@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "3b57ee12-c922-430c-9cbc-000000000006",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "it-admin",
+      "firstName": "IT",
+      "lastName": "Administrator",
+      "email": "it-admin@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "3b57ee12-c922-430c-9cbc-000000000007",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "security-reviewer",
+      "firstName": "Security",
+      "lastName": "Reviewer",
+      "email": "security-reviewer@example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "3b57ee12-c922-430c-9cbc-000000000008",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${CLASS_FIXTURE_PASSWORD}",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "cloud-storage",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${CLASS_OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "${CLASS_APP_ORIGIN}/api/auth/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ]
+}

@@ -1,0 +1,447 @@
+:root {
+  color-scheme: light;
+  --background: #f5f7f4;
+  --surface: #fff;
+  --soft: #f0f5f0;
+  --text: #192a24;
+  --muted: #50625a;
+  --line: #dce5dd;
+  --accent: #165e48;
+  --accent-hover: #104a38;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 280px;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--text);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+h1, h2, p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 4.75vw, 2.9rem);
+  font-weight: 680;
+  letter-spacing: -.055em;
+  line-height: 1.07;
+}
+
+h2 {
+  font-size: 1.125rem;
+  font-weight: 660;
+  letter-spacing: -.02em;
+  line-height: 1.35;
+}
+
+.site-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-content {
+  max-width: 1120px;
+  min-height: 72px;
+  padding: 10px clamp(16px, 4vw, 40px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.brand,
+.account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand {
+  flex: none;
+  font-size: .98rem;
+  font-weight: 700;
+  letter-spacing: -.025em;
+}
+
+.brand-icon,
+.entry-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: white;
+}
+
+.entry-icon {
+  width: 46px;
+  height: 46px;
+  background: #e5efe8;
+  color: var(--accent);
+}
+
+.folder-icon {
+  position: relative;
+  width: 17px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.folder-icon::before {
+  position: absolute;
+  top: -4px;
+  left: -1.5px;
+  width: 7px;
+  height: 4px;
+  border: 1.5px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  content: "";
+}
+
+.account {
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.account-name {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: .875rem;
+  font-weight: 650;
+  line-height: 1.3;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.button-primary:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.button-secondary {
+  border-color: #cbd7cd;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.button-secondary:not(:disabled):hover {
+  border-color: #93aa9b;
+  background: #eff5ef;
+}
+
+.button:disabled,
+.file-picker:has(input:disabled) .button {
+  border-color: var(--line);
+  background: #edf1ed;
+  color: #5e6b64;
+  cursor: default;
+}
+
+:focus-visible,
+.file-picker:has(input:focus-visible) .button {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.entry {
+  display: grid;
+  place-items: start center;
+  padding: clamp(45px, 12vh, 128px) 16px 48px;
+}
+
+.entry-card {
+  width: min(100%, 450px);
+  padding: clamp(24px, 6vw, 40px);
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: var(--surface);
+}
+
+.entry-card h1 {
+  margin-top: 18px;
+}
+
+.entry-description,
+.entry-status {
+  margin-top: 12px;
+  color: var(--muted);
+}
+
+.entry-card .notice,
+.entry-card .button {
+  margin-top: 20px;
+}
+
+.entry-card .button-primary {
+  min-width: 110px;
+}
+
+.workspace {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(31px, 6vw, 65px) clamp(16px, 4vw, 40px) 56px;
+}
+
+.workspace-heading {
+  margin-bottom: clamp(23px, 4vw, 32px);
+}
+
+.workspace-heading p,
+.panel-description,
+.files-empty > p:last-child {
+  margin-top: 7px;
+  color: var(--muted);
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 286px) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(16px, 3vw, 26px);
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.upload-panel {
+  padding: 24px;
+}
+
+.panel-description,
+.files-count,
+.file-meta,
+.selection {
+  font-size: .875rem;
+}
+
+.upload-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.upload-form > .button-primary {
+  width: 100%;
+}
+
+.file-picker {
+  display: block;
+  position: relative;
+  width: 100%;
+}
+
+.file-picker .button {
+  width: 100%;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.selection {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+  background: var(--soft);
+}
+
+.selection > span:first-child {
+  font-weight: 600;
+}
+
+.selection > span:last-child {
+  color: var(--muted);
+}
+
+.notice {
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: .875rem;
+  overflow-wrap: anywhere;
+}
+
+.notice-error {
+  border-color: #e6cbc2;
+  background: #fbf1ed;
+  color: #7b3020;
+}
+
+.notice-success {
+  border-color: #bedcc8;
+  background: #eff8f0;
+  color: #245938;
+}
+
+.signout-notice {
+  width: fit-content;
+  margin-bottom: 16px;
+}
+
+.files-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.files-count,
+.file-meta {
+  color: var(--muted);
+}
+
+.files-empty {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 196px;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.empty-title {
+  margin-top: 10px;
+  font-weight: 650;
+}
+
+.files-empty > p:last-child,
+.files-status {
+  font-size: .9rem;
+}
+
+.files-status {
+  padding: 20px 24px;
+  color: var(--muted);
+}
+
+.files-status .button {
+  margin-top: 12px;
+}
+
+.file-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+}
+
+.file-row + .file-row {
+  border-top: 1px solid var(--line);
+}
+
+.file-type {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  min-height: 40px;
+  border: 1px solid #dbe9df;
+  border-radius: 7px;
+  background: var(--soft);
+  color: var(--accent);
+  font-size: .625rem;
+  font-weight: 750;
+}
+
+.file-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.file-name {
+  font-size: .95rem;
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-panel,
+  .files-heading,
+  .files-status,
+  .file-row {
+    padding-inline: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .account-name {
+    font-size: .75rem;
+  }
+
+  .header-content {
+    gap: 8px;
+  }
+
+  .account {
+    gap: 7px;
+  }
+
+  .file-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .file-type {
+    display: none;
+  }
+}

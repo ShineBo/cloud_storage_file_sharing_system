@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  first-file:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run local:configure
+      - run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml build api
+      - run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml up -d --no-build --wait --wait-timeout 120
+      - run: npm run test:e2e
+      - if: failure()
+        run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml logs --tail=80
+      - if: always()
+        run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml down --volumes

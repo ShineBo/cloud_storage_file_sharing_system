@@ -1,0 +1,27 @@
+services:
+  identity:
+    image: quay.io/keycloak/keycloak:26.8.2
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: dev-file
+      KC_HOSTNAME: ${CLASS_IDENTITY_ORIGIN:-http://127.0.0.1:18080}
+      CLASS_APP_ORIGIN: ${CLASS_APP_ORIGIN:-http://127.0.0.1:3080}
+      CLASS_OIDC_CLIENT_SECRET: ${CLASS_OIDC_CLIENT_SECRET:?Run npm run local:configure}
+      CLASS_FIXTURE_PASSWORD: ${CLASS_FIXTURE_PASSWORD:?Run npm run local:configure}
+      KC_BOOTSTRAP_ADMIN_USERNAME:
+      KC_BOOTSTRAP_ADMIN_PASSWORD:
+    ports:
+      - "127.0.0.1:${KEYCLOAK_HOST_PORT:-18080}:8080"
+    volumes:
+      - type: bind
+        source: ./fixtures/keycloak/se-final-class-realm.json
+        target: /opt/keycloak/data/import/se-final-class-realm.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+  mailpit:
+    image: axllent/mailpit:v1.34.0
+    ports:
+      - "127.0.0.1:${MAILPIT_WEB_HOST_PORT:-18025}:8025"
+      - "127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-11025}:1025"
