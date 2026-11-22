@@ -17,7 +17,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ multipart: false }),
+    new FastifyAdapter({ multipart: false, requestTimeout: 3_600_000 }),
   );
   await app.register(multipart);
   app.setGlobalPrefix("api");

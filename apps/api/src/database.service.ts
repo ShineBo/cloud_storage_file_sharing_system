@@ -4,7 +4,7 @@ import {
   ServiceUnavailableException,
   type OnApplicationShutdown,
 } from "@nestjs/common";
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 @Injectable()
 export class DatabaseService implements OnApplicationShutdown {
@@ -17,10 +17,10 @@ export class DatabaseService implements OnApplicationShutdown {
     if (connectionString || process.env.PGHOST) {
       this.pool = new Pool({
         connectionString,
-        max: 2,
+        max: 10,
         connectionTimeoutMillis: 1_000,
-        query_timeout: 1_000,
-        statement_timeout: 1_000,
+        query_timeout: 6_000,
+        statement_timeout: 5_000,
       });
       this.pool.on("error", () => {
         this.logger.warn("An idle database connection closed unexpectedly.");
@@ -34,6 +34,30 @@ export class DatabaseService implements OnApplicationShutdown {
     }
 
     return this.pool.query<R>(text, values);
+  }
+
+  async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    if (!this.pool) {
+      throw new ServiceUnavailableException("Database is unavailable.");
+    }
+
+    const client = await this.pool.connect();
+    let discardConnection = false;
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        discardConnection = true;
+      }
+      throw error;
+    } finally {
+      client.release(discardConnection);
+    }
   }
 
   async isReady() {

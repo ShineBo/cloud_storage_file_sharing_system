@@ -11,6 +11,10 @@ jobs:
   first-file:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      FILE_MAX_BYTES: "8192"
+      FILE_QUOTA_BYTES: "32768"
+      STEP3_VERIFY_LIMITS: "1"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
