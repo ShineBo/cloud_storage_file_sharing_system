@@ -21,6 +21,7 @@ import { pipeline } from "node:stream/promises";
 import type { PoolClient } from "pg";
 import { DatabaseService } from "../database.service";
 import { expectedFileType, verifyFileType } from "./file-media";
+import { officePreview } from "./office-preview";
 
 const DEFAULT_MAX_FILE_BYTES = 2_000_000_000;
 const DEFAULT_QUOTA_BYTES = 20_000_000_000;
@@ -36,6 +37,10 @@ type FileRow = {
   sha256: string;
   mime_type: string;
   created_at: Date;
+};
+
+export type StoredBlob = Pick<FileRow, "original_name" | "size_bytes" | "sha256" | "mime_type"> & {
+  blob_key: string;
 };
 
 type UploadContext = {
@@ -181,7 +186,10 @@ export class FilesService {
     );
     const file = result.rows[0];
     if (!file) throw fileNotFound();
+    return this.serveAuthorized(file, "download");
+  }
 
+  async serveAuthorized(file: StoredBlob, action: "view" | "download") {
     let handle: FileHandle | undefined;
     try {
       const path = join(this.storagePath(), file.blob_key);
@@ -200,18 +208,28 @@ export class FilesService {
         throw new Error("File changed during verification.");
       }
 
+      if (action === "view" && file.mime_type.startsWith("application/vnd.openxmlformats-officedocument.")) {
+        try {
+          return await officePreview(handle, size, file.mime_type);
+        } finally {
+          await handle.close();
+          handle = undefined;
+        }
+      }
+
       const encodedName = encodeURIComponent(file.original_name).replace(
         /['()*]/g,
         (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
       );
+      const mode = action === "view" ? "inline" : "attachment";
       return new StreamableFile(handle.createReadStream({ start: 0, end: size - 1 }), {
-        disposition: `attachment; filename="download"; filename*=UTF-8''${encodedName}`,
+        disposition: `${mode}; filename="download"; filename*=UTF-8''${encodedName}`,
         type: file.mime_type,
         length: size,
       });
     } catch {
       await handle?.close();
-      this.logger.error("Could not verify a stored file for download.");
+      this.logger.error("Could not verify or serve a stored file.");
       throw new ServiceUnavailableException("The file is temporarily unavailable.");
     }
   }

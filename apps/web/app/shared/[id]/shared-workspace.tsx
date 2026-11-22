@@ -1,0 +1,296 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Header, formatSize } from "../../workspace";
+
+type SharedFolder = { id: string; name: string; type: "folder" };
+type SharedFile = { id: string; name: string; type: "file"; size: number; mimeType: string };
+type SharedEntry = SharedFolder | SharedFile;
+
+type ShareContents = {
+  item: SharedEntry;
+  entries: SharedEntry[];
+  ancestors: { id: string; name: string }[];
+  ownerName: string;
+  expiresAt: string;
+  permission: "view" | "edit";
+  allowDownload: boolean;
+};
+
+type LoadState =
+  | { status: "loading" }
+  | { status: "ready"; data: ShareContents }
+  | { status: "error"; code: number; message: string; loginFailed?: boolean };
+
+const expiryFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+async function accessError(response: Response, loginStatus?: string | null) {
+  if (response.status === 401 || response.status === 404) {
+    if (loginStatus === "denied") {
+      return "This organization account could not open the link. Try an approved account or contact your administrator.";
+    }
+    if (loginStatus === "unavailable") return "Sign-in is temporarily unavailable. Try again in a moment.";
+  }
+  switch (response.status) {
+    case 401:
+      return "Sign in with your organization account to open this link.";
+    case 403:
+      return "Your sharing permission does not allow this action.";
+    case 404:
+      return "This item is unavailable to your account. Ask the sender to check who has access.";
+    case 410: {
+      const body = await response.json().catch(() => undefined) as { message?: unknown } | undefined;
+      return typeof body?.message === "string"
+        ? body.message
+        : "This link has expired or been revoked. Ask the sender for a new link.";
+    }
+    default:
+      return "The shared item could not be opened. Try again in a moment.";
+  }
+}
+
+export function SharedWorkspace({ id }: { id: string }) {
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<SharedFile>();
+  const [showPreview, setShowPreview] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const sharePath = `/api/shared/${encodeURIComponent(id)}`;
+  const loginPath = `/api/auth/login?share=${encodeURIComponent(id)}`;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadContents() {
+      try {
+        const query = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+        const response = await fetch(`${sharePath}${query}`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) {
+          const loginStatus = new URLSearchParams(window.location.search).get("auth");
+          const message = await accessError(response, loginStatus);
+          const loginFailed = loginStatus === "denied" || loginStatus === "unavailable";
+          if (!controller.signal.aborted) setState({ status: "error", code: response.status, message, loginFailed });
+          return;
+        }
+        const data = await response.json() as ShareContents;
+        if (!controller.signal.aborted) setState({ status: "ready", data });
+      } catch {
+        if (!controller.signal.aborted) {
+          setState({ status: "error", code: 0, message: "The shared item could not be opened. Check your connection and try again." });
+        }
+      }
+    }
+
+    void loadContents();
+    return () => controller.abort();
+  }, [folderId, attempt, sharePath]);
+
+  function openFolder(nextFolder: string | null) {
+    setSelected(undefined);
+    setShowPreview(false);
+    if (nextFolder !== folderId) {
+      setState({ status: "loading" });
+      setFolderId(nextFolder);
+    }
+  }
+
+  function reload() {
+    setSelected(undefined);
+    setShowPreview(false);
+    setState({ status: "loading" });
+    setAttempt((previous) => previous + 1);
+  }
+
+  if (state.status !== "ready") {
+    const signedOut = state.status === "error" && state.code === 401;
+    return (
+      <>
+        <Header />
+        <main className="entry">
+          <section className="entry-card" aria-labelledby="shared-title">
+            <div className="entry-icon" aria-hidden="true"><span className="folder-icon" /></div>
+            <h1 id="shared-title">{signedOut ? "Open shared item" : "Shared item"}</h1>
+            {state.status === "loading" && <p className="entry-status" role="status">Opening link…</p>}
+            {state.status === "error" && (
+              <>
+                {signedOut && !state.loginFailed ? <p className="entry-description">{state.message}</p>
+                  : <p className="notice notice-error" role="alert">{state.message}</p>}
+                <div className="shared-error-actions">
+                  {signedOut && <a className="button button-primary" href={loginPath}>Sign in</a>}
+                  {state.code === 404 && <a className="button button-secondary" href={loginPath}>Switch account</a>}
+                  {(state.code === 0 || state.code >= 500) && (
+                    <button className="button button-secondary" type="button" onClick={reload}>Try again</button>
+                  )}
+                  <a className="button button-secondary" href="/">My files</a>
+                </div>
+              </>
+            )}
+          </section>
+        </main>
+      </>
+    );
+  }
+
+  const { data } = state;
+  const current = selected ?? data.item;
+  const expiry = expiryFormat.format(new Date(data.expiresAt));
+
+  return (
+    <>
+      <Header />
+      <main className="workspace shared-workspace">
+        <a className="shared-back" href="/">My files</a>
+        <div className="workspace-heading shared-heading">
+          <h1>{current.name}</h1>
+          <p>
+            Shared by {data.ownerName}
+            {" · "}
+            {data.permission === "edit" ? "Edit access" : "View access"}
+            {" · Expires "}
+            <time dateTime={data.expiresAt}>{expiry}</time>
+          </p>
+        </div>
+        {(data.ancestors.length > 0 || selected) && (
+          <nav className="breadcrumbs" aria-label="Shared folder path">
+            <ol>
+              {data.ancestors.map((folder, index) => (
+                <li key={folder.id}>
+                  {index > 0 && <span aria-hidden="true" className="breadcrumb-separator">/</span>}
+                  <button type="button" onClick={() => openFolder(index === 0 ? null : folder.id)}>
+                    {folder.name}
+                  </button>
+                </li>
+              ))}
+              {selected && (
+                <li>
+                  {data.ancestors.length > 0 && <span aria-hidden="true" className="breadcrumb-separator">/</span>}
+                  <button type="button" onClick={() => openFolder(folderId)}>{data.item.name}</button>
+                </li>
+              )}
+              <li>
+                <span aria-hidden="true" className="breadcrumb-separator">/</span>
+                <span aria-current="location">{current.name}</span>
+              </li>
+            </ol>
+          </nav>
+        )}
+        {current.type === "folder" ? (
+          <section className="panel files-panel" aria-labelledby="shared-items">
+            <div className="files-heading"><h2 id="shared-items">Folder contents</h2></div>
+            {data.entries.length === 0 ? <p className="files-status">This folder is empty.</p> : (
+              <ul className="file-list">
+                {data.entries.map((entry) => (
+                  <li className="file-row shared-file-row" key={entry.id}>
+                    <div className="file-type" aria-hidden="true">
+                      {entry.type === "folder" ? <span className="folder-icon" />
+                        : entry.name.split(".").pop()?.toUpperCase()}
+                    </div>
+                    <div className="file-info">
+                      <button
+                        className="folder-link"
+                        type="button"
+                        aria-label={`Open ${entry.name}`}
+                        onClick={() => entry.type === "folder" ? openFolder(entry.id) : setSelected(entry)}
+                      >
+                        {entry.name}
+                      </button>
+                      <p className="file-meta">{entry.type === "folder" ? "Folder" : formatSize(entry.size)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <section className="panel shared-file-panel" aria-labelledby="shared-file-actions">
+            <div className="shared-file-toolbar">
+              <div>
+                <h2 id="shared-file-actions">File access</h2>
+                <p className="file-meta">{formatSize(current.size)}</p>
+              </div>
+              <div className="item-actions">
+                <button className="button button-primary" type="button"
+                  aria-expanded={showPreview} onClick={() => setShowPreview((previous) => !previous)}>
+                  {showPreview ? "Close preview" : "Preview file"}
+                </button>
+                {data.allowDownload && (
+                  <a className="button button-secondary" download aria-label={`Download ${current.name}`}
+                    href={`${sharePath}/files/${encodeURIComponent(current.id)}/download`}>
+                    Download
+                  </a>
+                )}
+              </div>
+            </div>
+            {showPreview && (
+              <FilePreview
+                key={current.id}
+                file={current}
+                url={`${sharePath}/files/${encodeURIComponent(current.id)}/view`}
+                onReload={reload}
+              />
+            )}
+          </section>
+        )}
+      </main>
+    </>
+  );
+}
+
+function FilePreview({ file, url, onReload }: { file: SharedFile; url: string; onReload: () => void }) {
+  const isPdf = file.mimeType === "application/pdf";
+  const isImage = file.mimeType === "image/jpeg" || file.mimeType === "image/png";
+  const [sections, setSections] = useState<string[]>();
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (isImage || isPdf) return;
+    const controller = new AbortController();
+
+    async function loadPreview() {
+      try {
+        const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) {
+          const message = await accessError(response);
+          if (!controller.signal.aborted) setError(message);
+          return;
+        }
+        const preview = await response.json() as { sections: string[] };
+        if (!controller.signal.aborted) setSections(preview.sections);
+      } catch {
+        if (!controller.signal.aborted) setError("The preview could not be loaded. Try again in a moment.");
+      }
+    }
+
+    void loadPreview();
+    return () => controller.abort();
+  }, [isImage, isPdf, url]);
+
+  if (error) {
+    return (
+      <div className="shared-preview">
+        <p className="notice notice-error" role="alert">{error}</p>
+        <button className="button button-secondary share-retry" type="button" onClick={onReload}>Check link access</button>
+      </div>
+    );
+  }
+
+  if (isPdf) {
+    return <iframe className="shared-pdf" src={`${url}#toolbar=0&navpanes=0`}
+      title={`Preview of ${file.name}`} referrerPolicy="no-referrer" />;
+  }
+
+  if (isImage) {
+    return <div className="shared-preview">
+      <img src={url} alt={`Preview of ${file.name}`} referrerPolicy="no-referrer"
+        onError={() => setError("The image could not be previewed. Check your access and try again.")} />
+    </div>;
+  }
+
+  return (
+    <div className="shared-preview office-preview" aria-label={`Preview of ${file.name}`}>
+      {sections === undefined ? <p className="file-meta" role="status">Loading preview…</p>
+        : sections.length === 0 ? <p className="file-meta">This document has no text to preview.</p>
+          : sections.map((section, index) => <p key={index}>{section}</p>)}
+    </div>
+  );
+}

@@ -643,3 +643,163 @@ h2 {
     margin-inline: 16px;
   }
 }
+
+.share-dialog {
+  width: min(600px, calc(100% - 32px));
+}
+
+.share-dialog-heading,
+.shared-file-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.share-fields,
+.share-link {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.share-fields .share-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+}
+
+.share-check input {
+  width: 17px;
+  min-height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.share-history {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.share-history h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.share-history ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.share-history li {
+  padding: 10px 0;
+}
+
+.share-history li + li {
+  border-top: 1px solid var(--line);
+}
+
+.share-link {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 8px;
+}
+
+.share-retry {
+  margin-top: 12px;
+}
+
+.shared-workspace {
+  max-width: 860px;
+}
+
+.shared-back {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.shared-heading h1 {
+  overflow-wrap: anywhere;
+}
+
+.shared-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.shared-file-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.shared-file-panel {
+  padding: 20px;
+}
+
+.shared-pdf,
+.shared-preview {
+  width: 100%;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.shared-pdf {
+  display: block;
+  min-height: min(550px, 65vh);
+}
+
+.shared-preview {
+  padding: 15px;
+}
+
+.shared-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  margin: auto;
+  object-fit: contain;
+}
+
+.office-preview {
+  max-height: 58vh;
+  overflow: auto;
+}
+
+.office-preview p {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.office-preview p + p {
+  margin-top: 8px;
+}
+
+@media (max-width: 460px) {
+  .share-fields,
+  .share-link {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .share-link .item-actions {
+    grid-column: auto;
+    justify-content: flex-start;
+  }
+
+  .shared-file-toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .shared-file-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

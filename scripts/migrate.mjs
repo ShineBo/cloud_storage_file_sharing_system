@@ -21,6 +21,24 @@ async function seedClassDirectory(db) {
         `${user.firstName} ${user.lastName}`, user.username !== "dana"],
     );
   }
+
+  const createdGroup = await db.query(
+    `INSERT INTO internal_groups (id, issuer, name, approved)
+     VALUES ($1, $2, 'Design Team', true)
+     ON CONFLICT (issuer, name) DO NOTHING
+     RETURNING id`,
+    [randomUUID(), process.env.OIDC_ISSUER],
+  );
+  const group = createdGroup.rows[0];
+  if (group) {
+    const memberSubjects = users.filter(({ username }) => username === "bob" || username === "priya")
+      .map(({ id }) => id);
+    await db.query(
+      `INSERT INTO internal_group_members (issuer, group_id, employee_id)
+       SELECT issuer, $2, id FROM employees WHERE issuer = $1 AND subject = ANY($3::text[])`,
+      [process.env.OIDC_ISSUER, group.id, memberSubjects],
+    );
+  }
 }
 
 const db = new Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 5_000 });

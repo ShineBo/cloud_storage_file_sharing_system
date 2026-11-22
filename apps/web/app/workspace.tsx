@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { ShareDialog } from "./share-dialog";
 
 export type User = {
   id: string;
@@ -51,7 +52,7 @@ const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const folderSort = new Intl.Collator(undefined, { numeric: true });
 
-function formatSize(bytes: number) {
+export function formatSize(bytes: number) {
   if (bytes < 1000) return `${bytes} B`;
   if (bytes < 1_000_000) return `${sizeFormat.format(bytes / 1000)} kB`;
   if (bytes < 1_000_000_000) return `${sizeFormat.format(bytes / 1_000_000)} MB`;
@@ -212,6 +213,7 @@ export function Workspace({
   const [uploadFeedback, setUploadFeedback] = useState<Feedback>();
   const [itemFeedback, setItemFeedback] = useState<Feedback>();
   const [action, setAction] = useState<ItemAction>();
+  const [shareItem, setShareItem] = useState<Item>();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutFailed, setSignOutFailed] = useState(false);
 
@@ -397,7 +399,7 @@ export function Workspace({
       <main className="workspace">
         <div className="workspace-heading">
           <h1>My files</h1>
-          <p>Organize, upload, and download files in your private workspace.</p>
+          <p>Organize and share files from your private workspace.</p>
         </div>
         {breadcrumbs.length > 0 && (
           <nav className="breadcrumbs" aria-label="Folder path">
@@ -498,7 +500,7 @@ export function Workspace({
                         </button>
                         <span className="file-meta">Folder</span>
                       </div>
-                      <ItemActions item={{ type: "folder", data: folder }} disabled={!canEdit} onAction={setAction} />
+                      <ItemActions item={{ type: "folder", data: folder }} disabled={!canEdit} onAction={setAction} onShare={setShareItem} />
                     </li>
                   ))}
                   {workspace.files.map((file) => (
@@ -512,7 +514,7 @@ export function Workspace({
                           <time dateTime={file.createdAt}>{dateFormat.format(new Date(file.createdAt))}</time>
                         </span>
                       </div>
-                      <ItemActions item={{ type: "file", data: file }} disabled={!canEdit} onAction={setAction} />
+                      <ItemActions item={{ type: "file", data: file }} disabled={!canEdit} onAction={setAction} onShare={setShareItem} />
                     </li>
                   ))}
                 </ul>
@@ -527,6 +529,9 @@ export function Workspace({
           </section>
         </div>
       </main>
+      {shareItem && (
+        <ShareDialog item={shareItem} onClose={() => setShareItem(undefined)} onSessionExpired={onSessionExpired} />
+      )}
       {action && workspace && (
         <ItemDialog
           action={action}
@@ -558,10 +563,12 @@ function ItemActions({
   item,
   disabled,
   onAction,
+  onShare,
 }: {
   item: Item;
   disabled: boolean;
   onAction: (action: ItemAction) => void;
+  onShare: (item: Item) => void;
 }) {
   return (
     <div className="item-actions">
@@ -574,6 +581,10 @@ function ItemActions({
         aria-label={`Move ${item.data.name}`} disabled={disabled}
         onClick={() => onAction({ type: "move", item })}>
         Move
+      </button>
+      <button className="button button-secondary" type="button"
+        aria-label={`Share ${item.data.name}`} disabled={disabled} onClick={() => onShare(item)}>
+        Share
       </button>
       {item.type === "file" && (
         <a

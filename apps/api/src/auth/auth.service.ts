@@ -10,6 +10,11 @@ import { OidcService, type OidcAttempt } from "./oidc.service";
 
 const LOGIN_MAX_AGE = 10 * 60;
 const SESSION_MAX_AGE = 8 * 60 * 60;
+const SHARE_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+export function shareLoginPath(value: unknown) {
+  return typeof value === "string" && SHARE_ID.test(value) ? `/shared/${value.toLowerCase()}` : "/";
+}
 
 export interface AuthenticatedUser {
   id: string;
@@ -24,7 +29,8 @@ export class AuthService {
     private readonly oidc: OidcService,
   ) {}
 
-  async beginLogin(request: FastifyRequest) {
+  async beginLogin(request: FastifyRequest, share: unknown) {
+    const shareId = typeof share === "string" && SHARE_ID.test(share) ? share : null;
     const { authorizationUrl, attempt } = await this.oidc.begin();
     const secure = this.oidc.secureCookies;
     const previous = readAuthCookie(request, "se_login_attempt", secure);
@@ -35,8 +41,8 @@ export class AuthService {
         WITH expired AS (
           DELETE FROM oidc_login_attempts WHERE expires_at <= now() OR token_hash = $6
         )
-        INSERT INTO oidc_login_attempts (token_hash, state, nonce, code_verifier, expires_at)
-        VALUES ($1, $2, $3, $4, now() + $5::integer * interval '1 second')
+        INSERT INTO oidc_login_attempts (token_hash, state, nonce, code_verifier, expires_at, share_id)
+        VALUES ($1, $2, $3, $4, now() + $5::integer * interval '1 second', $7)
       `,
       [
         hashAuthToken(token),
@@ -45,6 +51,7 @@ export class AuthService {
         attempt.code_verifier,
         LOGIN_MAX_AGE,
         previous ? hashAuthToken(previous) : null,
+        shareId,
       ],
     );
 
@@ -65,11 +72,11 @@ export class AuthService {
     }
 
     // Take a matching attempt once, even if callbacks race each other.
-    const attempts = await this.database.query<OidcAttempt>(
+    const attempts = await this.database.query<OidcAttempt & { share_id: string | null }>(
       `
         DELETE FROM oidc_login_attempts
         WHERE token_hash = $1 AND state = $2 AND expires_at > now()
-        RETURNING state, nonce, code_verifier
+        RETURNING state, nonce, code_verifier, share_id
       `,
       [hashAuthToken(attemptToken), states[0]],
     );
@@ -78,10 +85,10 @@ export class AuthService {
       return undefined;
     }
 
-    const identity = await this.oidc.identity(callback, attempt);
-    if (!identity) {
-      return undefined;
-    }
+    const location = attempt.share_id ? `/shared/${attempt.share_id}` : "/";
+    const identity = await this.oidc.identity(callback, attempt).catch(() => null);
+    if (identity === null) return { location, outcome: "unavailable" } as const;
+    if (!identity) return { location, outcome: "denied" } as const;
 
     const token = newAuthToken();
     const previous = readAuthCookie(request, "se_session", secure);
@@ -106,10 +113,8 @@ export class AuthService {
         previous ? hashAuthToken(previous) : null,
       ],
     );
-    if (!session.rows[0]) {
-      return undefined;
-    }
-    return authCookie("se_session", token, SESSION_MAX_AGE, secure);
+    if (!session.rows[0]) return { location, outcome: "denied" } as const;
+    return { location, cookie: authCookie("se_session", token, SESSION_MAX_AGE, secure) } as const;
   }
 
   async requireUser(request: FastifyRequest): Promise<AuthenticatedUser> {

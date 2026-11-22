@@ -2,7 +2,9 @@
 
 A private file workspace for teams. Sign in with an organization account to upload, organize, and download files in your own workspace.
 
-Files and folders can be renamed and moved within a private hierarchy. The app accepts PDF, DOCX, XLSX, PPTX, JPEG, and PNG files, with a default limit of 2 GB per file and 20 GB per employee. PostgreSQL stores metadata and SHA-256 hashes. File contents are kept on a private volume. Internal sharing links and version history are planned.
+Organize files in a private folder hierarchy and share individual files or folders with employees and approved groups. Recipients sign in to preview shared content. Owners can allow downloads separately and revoke links at any time. Links expire after 30 days by default.
+
+The app accepts PDF, DOCX, XLSX, PPTX, JPEG, and PNG files, with a default limit of 2 GB per file and 20 GB per employee. PostgreSQL stores metadata and SHA-256 hashes. File contents are kept on a private volume.
 
 ## Run locally
 
