@@ -1,5 +1,5 @@
 {
-  "name": "@se-final/api",
+  "name": "@cloud-storage/api",
   "version": "0.1.0",
   "private": true,
   "scripts": {

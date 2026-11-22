@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Cloud Storage",
-  description: "A workspace for your organization files.",
+  description: "A private workspace for uploading and downloading files with organization sign-in.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

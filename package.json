@@ -1,6 +1,7 @@
 {
-  "name": "se-final-project",
+  "name": "cloud-storage-file-sharing-system",
   "version": "0.1.0",
+  "description": "A private file workspace with organization sign-in and persistent storage.",
   "private": true,
   "workspaces": [
     "apps/web",
@@ -12,10 +13,10 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "dev:web": "npm run dev --workspace @se-final/web --",
-    "dev:api": "npm run dev --workspace @se-final/api --",
-    "start:web": "npm run start --workspace @se-final/web --",
-    "start:api": "npm run start --workspace @se-final/api --",
+    "dev:web": "npm run dev --workspace @cloud-storage/web --",
+    "dev:api": "npm run dev --workspace @cloud-storage/api --",
+    "start:web": "npm run start --workspace @cloud-storage/web --",
+    "start:api": "npm run start --workspace @cloud-storage/api --",
     "local:configure": "node scripts/local-config.mjs",
     "test:e2e": "playwright test"
   },

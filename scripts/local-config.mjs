@@ -15,7 +15,7 @@ const keys = ["CLASS_OIDC_CLIENT_SECRET", "CLASS_FIXTURE_PASSWORD"];
 const missing = keys.filter((key) => !new RegExp(String.raw`^\s*(?:export\s+)?${key}\s*=`, "m").test(contents));
 if (missing.length > 0) {
   const additions = missing.map((key) => `${key}=${randomBytes(24).toString("hex")}`).join("\n");
-  await writeFile(path, `${contents.trimEnd()}\n\n# Credentials for the local synthetic class realm.\n${additions}\n`, { mode: 0o600 });
+  await writeFile(path, `${contents.trimEnd()}\n\n# Credentials for the local demo identity provider.\n${additions}\n`, { mode: 0o600 });
 }
 
 console.log("Local class configuration is ready.");

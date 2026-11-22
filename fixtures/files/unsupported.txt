@@ -1,1 +1,1 @@
-Synthetic file outside the class upload allowlist.
+Synthetic sample for checking unsupported file types.

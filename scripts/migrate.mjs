@@ -6,7 +6,7 @@ const { Client } = pg;
 const migrations = new URL("../apps/api/migrations/", import.meta.url);
 
 async function seedClassDirectory(db) {
-  if (!process.env.OIDC_ISSUER) throw new Error("OIDC_ISSUER is required to seed the class directory.");
+  if (!process.env.OIDC_ISSUER) throw new Error("OIDC_ISSUER is required to seed the demo directory.");
 
   const file = new URL("../fixtures/keycloak/se-final-class-realm.json", import.meta.url);
   const { users } = JSON.parse(await readFile(file, "utf8"));
