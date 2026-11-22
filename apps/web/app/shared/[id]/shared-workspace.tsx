@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Header, formatSize } from "../../workspace";
+import { formatSize } from "../../file-transfer";
+import { RevisionDetails, RevisionDialog, staleRevisionNotice, type Revision } from "../../revision-dialog";
+import { Header } from "../../workspace";
 
 type SharedFolder = { id: string; name: string; type: "folder" };
-type SharedFile = { id: string; name: string; type: "file"; size: number; mimeType: string };
+type SharedFile = Revision & { id: string; name: string; type: "file"; size: number; mimeType: string };
 type SharedEntry = SharedFolder | SharedFile;
 
 type ShareContents = {
@@ -52,7 +54,9 @@ async function accessError(response: Response, loginStatus?: string | null) {
 export function SharedWorkspace({ id }: { id: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [folderId, setFolderId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<SharedFile>();
+  const [selectedId, setSelectedId] = useState<string>();
+  const [revisionOpen, setRevisionOpen] = useState(false);
+  const [revisionNotice, setRevisionNotice] = useState<{ kind: "success" | "error"; message: string }>();
   const [showPreview, setShowPreview] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const sharePath = `/api/shared/${encodeURIComponent(id)}`;
@@ -86,7 +90,8 @@ export function SharedWorkspace({ id }: { id: string }) {
   }, [folderId, attempt, sharePath]);
 
   function openFolder(nextFolder: string | null) {
-    setSelected(undefined);
+    setSelectedId(undefined);
+    setRevisionNotice(undefined);
     setShowPreview(false);
     if (nextFolder !== folderId) {
       setState({ status: "loading" });
@@ -95,7 +100,7 @@ export function SharedWorkspace({ id }: { id: string }) {
   }
 
   function reload() {
-    setSelected(undefined);
+    setRevisionOpen(false);
     setShowPreview(false);
     setState({ status: "loading" });
     setAttempt((previous) => previous + 1);
@@ -132,6 +137,7 @@ export function SharedWorkspace({ id }: { id: string }) {
   }
 
   const { data } = state;
+  const selected = data.entries.find((entry) => entry.type === "file" && entry.id === selectedId);
   const current = selected ?? data.item;
   const expiry = expiryFormat.format(new Date(data.expiresAt));
 
@@ -150,6 +156,12 @@ export function SharedWorkspace({ id }: { id: string }) {
             <time dateTime={data.expiresAt}>{expiry}</time>
           </p>
         </div>
+        {revisionNotice && (
+          <p className={`notice notice-${revisionNotice.kind} shared-revision-notice`}
+            role={revisionNotice.kind === "error" ? "alert" : "status"}>
+            {revisionNotice.message}
+          </p>
+        )}
         {(data.ancestors.length > 0 || selected) && (
           <nav className="breadcrumbs" aria-label="Shared folder path">
             <ol>
@@ -190,7 +202,13 @@ export function SharedWorkspace({ id }: { id: string }) {
                         className="folder-link"
                         type="button"
                         aria-label={`Open ${entry.name}`}
-                        onClick={() => entry.type === "folder" ? openFolder(entry.id) : setSelected(entry)}
+                        onClick={() => {
+                          if (entry.type === "folder") openFolder(entry.id);
+                          else {
+                            setSelectedId(entry.id);
+                            setRevisionNotice(undefined);
+                          }
+                        }}
                       >
                         {entry.name}
                       </button>
@@ -207,12 +225,18 @@ export function SharedWorkspace({ id }: { id: string }) {
               <div>
                 <h2 id="shared-file-actions">File access</h2>
                 <p className="file-meta">{formatSize(current.size)}</p>
+                <RevisionDetails file={current} />
               </div>
               <div className="item-actions">
                 <button className="button button-primary" type="button"
                   aria-expanded={showPreview} onClick={() => setShowPreview((previous) => !previous)}>
                   {showPreview ? "Close preview" : "Preview file"}
                 </button>
+                {data.permission === "edit" && (
+                  <button className="button button-secondary" type="button" onClick={() => setRevisionOpen(true)}>
+                    Publish revision
+                  </button>
+                )}
                 {data.allowDownload && (
                   <a className="button button-secondary" download aria-label={`Download ${current.name}`}
                     href={`${sharePath}/files/${encodeURIComponent(current.id)}/download`}>
@@ -223,7 +247,7 @@ export function SharedWorkspace({ id }: { id: string }) {
             </div>
             {showPreview && (
               <FilePreview
-                key={current.id}
+                key={`${current.id}:${current.revision}`}
                 file={current}
                 url={`${sharePath}/files/${encodeURIComponent(current.id)}/view`}
                 onReload={reload}
@@ -232,6 +256,22 @@ export function SharedWorkspace({ id }: { id: string }) {
           </section>
         )}
       </main>
+      {revisionOpen && current.type === "file" && data.permission === "edit" && (
+        <RevisionDialog file={current} endpoint={`${sharePath}/files/${encodeURIComponent(current.id)}/revisions`}
+          onClose={() => setRevisionOpen(false)}
+          onPublished={(version) => {
+            setRevisionNotice({ kind: "success", message: `Version ${version} published.` });
+            reload();
+          }}
+          onStale={() => {
+            setRevisionNotice({ kind: "error", message: staleRevisionNotice });
+            reload();
+          }}
+          onUnavailable={(status) => {
+            if (status === 404) setRevisionNotice({ kind: "error", message: "This file is unavailable through the link." });
+            reload();
+          }} />
+      )}
     </>
   );
 }

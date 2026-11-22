@@ -7,6 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { fileExtension, formatSize, uploadFileRequest } from "./file-transfer";
+import { RevisionDetails, RevisionDialog, staleRevisionNotice, type Revision } from "./revision-dialog";
 import { ShareDialog } from "./share-dialog";
 
 export type User = {
@@ -22,7 +24,7 @@ type Folder = {
   createdAt: string;
 };
 
-type StoredFile = {
+type StoredFile = Revision & {
   id: string;
   name: string;
   size: number;
@@ -49,20 +51,7 @@ type ItemAction = { type: "create" } | { type: "rename" | "move"; item: Item };
 const extensions = [".png", ".jpg", ".jpeg", ".pdf", ".docx", ".xlsx", ".pptx"];
 const fileTypes = "PDF, DOCX, XLSX, PPTX, JPEG, and PNG";
 const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const folderSort = new Intl.Collator(undefined, { numeric: true });
-
-export function formatSize(bytes: number) {
-  if (bytes < 1000) return `${bytes} B`;
-  if (bytes < 1_000_000) return `${sizeFormat.format(bytes / 1000)} kB`;
-  if (bytes < 1_000_000_000) return `${sizeFormat.format(bytes / 1_000_000)} MB`;
-  return `${sizeFormat.format(bytes / 1_000_000_000)} GB`;
-}
-
-function fileExtension(name: string) {
-  const dot = name.lastIndexOf(".");
-  return dot < 0 ? "" : name.slice(dot).toLowerCase();
-}
 
 function validateFile(file: File, policy: StoragePolicy) {
   if (file.size === 0) return "This file is empty. Choose another file.";
@@ -135,27 +124,6 @@ function itemErrorMessage(status: number, action: ItemAction) {
   }
 }
 
-function uploadFileRequest(
-  url: string,
-  file: File,
-  onProgress: (percent: number) => void,
-) {
-  return new Promise<number>((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("POST", url);
-    request.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) onProgress(Math.floor((event.loaded / event.total) * 100));
-    });
-    request.addEventListener("load", () => resolve(request.status));
-    request.addEventListener("error", () => reject(new Error("Upload disconnected.")));
-    request.addEventListener("abort", () => reject(new Error("Upload interrupted.")));
-
-    const form = new FormData();
-    form.set("file", file);
-    request.send(form);
-  });
-}
-
 export function Header({
   user,
   onSignOut,
@@ -214,6 +182,7 @@ export function Workspace({
   const [itemFeedback, setItemFeedback] = useState<Feedback>();
   const [action, setAction] = useState<ItemAction>();
   const [shareItem, setShareItem] = useState<Item>();
+  const [revisionFile, setRevisionFile] = useState<StoredFile>();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutFailed, setSignOutFailed] = useState(false);
 
@@ -278,6 +247,13 @@ export function Workspace({
     setLoadAttempt((previous) => previous + 1);
   }
 
+  function finishRevision(feedback: Feedback) {
+    setRevisionFile(undefined);
+    setItemFeedback(feedback);
+    reloadWorkspace();
+    headingRef.current?.focus();
+  }
+
   function openFolder(id: string | null) {
     if (uploading || signingOut || id === folderId) return;
     if (inputRef.current) inputRef.current.value = "";
@@ -321,7 +297,7 @@ export function Workspace({
     const query = new URLSearchParams({ size: String(selectedFile.size) });
     if (folderId) query.set("folderId", folderId);
     try {
-      const status = await uploadFileRequest(`/api/files?${query}`, selectedFile, setUploadPercent);
+      const { status } = await uploadFileRequest(`/api/files?${query}`, selectedFile, setUploadPercent);
       if (status === 401) {
         onSessionExpired();
         return;
@@ -508,13 +484,11 @@ export function Workspace({
                       <div className="file-type" aria-hidden="true">{fileExtension(file.name).slice(1).toUpperCase()}</div>
                       <div className="file-info">
                         <span className="file-name">{file.name}</span>
-                        <span className="file-meta">
-                          {formatSize(file.size)}
-                          <span aria-hidden="true"> · </span>
-                          <time dateTime={file.createdAt}>{dateFormat.format(new Date(file.createdAt))}</time>
-                        </span>
+                        <span className="file-meta">{formatSize(file.size)}</span>
+                        <RevisionDetails file={file} />
                       </div>
-                      <ItemActions item={{ type: "file", data: file }} disabled={!canEdit} onAction={setAction} onShare={setShareItem} />
+                      <ItemActions item={{ type: "file", data: file }} disabled={!canEdit}
+                        onAction={setAction} onShare={setShareItem} onRevise={setRevisionFile} />
                     </li>
                   ))}
                 </ul>
@@ -531,6 +505,16 @@ export function Workspace({
       </main>
       {shareItem && (
         <ShareDialog item={shareItem} onClose={() => setShareItem(undefined)} onSessionExpired={onSessionExpired} />
+      )}
+      {revisionFile && (
+        <RevisionDialog file={revisionFile} endpoint={`/api/files/${encodeURIComponent(revisionFile.id)}/revisions`}
+          limits={policy} onClose={() => setRevisionFile(undefined)}
+          onPublished={(version) => finishRevision({ kind: "success", message: `Version ${version} published.` })}
+          onStale={() => finishRevision({ kind: "error", message: staleRevisionNotice })}
+          onUnavailable={(status) => {
+            if (status === 401) onSessionExpired();
+            else finishRevision({ kind: "error", message: "This file is unavailable. Check your workspace." });
+          }} />
       )}
       {action && workspace && (
         <ItemDialog
@@ -564,11 +548,13 @@ function ItemActions({
   disabled,
   onAction,
   onShare,
+  onRevise,
 }: {
   item: Item;
   disabled: boolean;
   onAction: (action: ItemAction) => void;
   onShare: (item: Item) => void;
+  onRevise?: (file: StoredFile) => void;
 }) {
   return (
     <div className="item-actions">
@@ -587,14 +573,17 @@ function ItemActions({
         Share
       </button>
       {item.type === "file" && (
-        <a
-          className="button button-secondary"
-          href={`/api/files/${encodeURIComponent(item.data.id)}/download`}
-          download
-          aria-label={`Download ${item.data.name}`}
-        >
-          Download
-        </a>
+        <>
+          <button className="button button-secondary" type="button"
+            aria-label={`Publish revision for ${item.data.name}`} disabled={disabled}
+            onClick={() => onRevise?.(item.data)}>
+            Revise
+          </button>
+          <a className="button button-secondary" href={`/api/files/${encodeURIComponent(item.data.id)}/download`}
+            download aria-label={`Download ${item.data.name}`}>
+            Download
+          </a>
+        </>
       )}
     </div>
   );

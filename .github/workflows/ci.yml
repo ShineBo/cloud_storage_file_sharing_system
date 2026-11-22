@@ -30,7 +30,7 @@ jobs:
       - run: npm run local:configure
       - run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml build api
       - run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml up -d --no-build --wait --wait-timeout 120
-      - run: npm run test:e2e
+      - run: npm run test:e2e -- --workers=1
       - if: failure()
         run: docker compose -f compose.yaml -f compose.integrations.yaml -f compose.app.yaml logs --tail=80
       - if: always()

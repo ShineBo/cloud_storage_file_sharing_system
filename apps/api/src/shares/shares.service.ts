@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
+import { AuditService, type AuditAttempt } from "../audit/audit.service";
 import { DatabaseService } from "../database.service";
 import type { StoredBlob } from "../files/files.service";
 
@@ -42,8 +43,9 @@ type ShareRow = {
 type OwnedShareRow = ShareRow & { recipient_name: string };
 type RecipientShareRow = ShareRow & { owner_name: string; expired: boolean };
 type FolderRow = { id: string; name: string; parent_id: string | null };
-type FileRow = { id: string; folder_id: string | null } & StoredBlob;
-type FileDetails = Pick<FileRow, "id" | "original_name" | "size_bytes" | "mime_type">;
+type FileDetails = StoredBlob & { id: string; revision: number; author_name: string; revised_at: Date };
+type FileRow = FileDetails & { owner_id: string; folder_id: string | null };
+const SHARED_FILE_COLUMNS = "id, original_name, size_bytes, mime_type, revision, author_name, revised_at";
 
 const OWNED_SHARE_SQL = `
   SELECT share.*, COALESCE(employee.display_name, team.name) AS recipient_name
@@ -54,7 +56,7 @@ const OWNED_SHARE_SQL = `
 
 @Injectable()
 export class SharesService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(private readonly database: DatabaseService, private readonly audit: AuditService) {}
 
   async recipients(ownerId: string) {
     const [employees, groups] = await Promise.all([
@@ -78,8 +80,10 @@ export class SharesService {
     return { employees: employees.rows, groups: groups.rows };
   }
 
-  async create(ownerId: string, body: unknown) {
+  async create(ownerId: string, body: unknown, event: AuditAttempt) {
     const input = readShareInput(body);
+    event.itemType = input.itemType;
+    event.itemId = input.itemId;
     const fileId = input.itemType === "file" ? input.itemId : null;
     const folderId = input.itemType === "folder" ? input.itemId : null;
     const employeeId = input.recipientType === "employee" ? input.recipientId : null;
@@ -130,6 +134,7 @@ export class SharesService {
           groupId, input.permission, input.allowDownload, DEFAULT_EXPIRY_DAYS,
         ],
       )).rows[0];
+      await this.audit.record({ ...event, outcome: "success", status: 201 }, client);
       return toOwnedShare({ ...saved, recipient_name: recipient.name });
     });
   }
@@ -148,20 +153,27 @@ export class SharesService {
     });
   }
 
-  async revoke(ownerId: string, id: string) {
+  async revoke(ownerId: string, id: string, event: AuditAttempt) {
     if (!UUID.test(id)) throw shareUnavailable();
     return this.database.transaction(async (client) => {
       const result = await client.query(
-        `UPDATE shares AS share SET revoked_at = COALESCE(share.revoked_at, clock_timestamp())
+        `UPDATE shares AS share SET revoked_at = clock_timestamp()
          FROM employees AS sender
-         WHERE share.id = $1 AND share.owner_id = $2 AND sender.id = share.owner_id AND sender.active`,
+         WHERE share.id = $1 AND share.owner_id = $2 AND sender.id = share.owner_id AND sender.active
+           AND share.revoked_at IS NULL`,
         [id, ownerId],
       );
-      if (!result.rowCount) throw shareUnavailable();
       const revoked = (await client.query<OwnedShareRow>(
-        `${OWNED_SHARE_SQL} WHERE share.id = $1 AND share.owner_id = $2`,
+        `${OWNED_SHARE_SQL} JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
+         WHERE share.id = $1 AND share.owner_id = $2`,
         [id, ownerId],
       )).rows[0];
+      if (!revoked) throw shareUnavailable();
+      if (result.rowCount) {
+        event.itemType = revoked.file_id ? "file" : "folder";
+        event.itemId = revoked.file_id ?? revoked.folder_id;
+        await this.audit.record({ ...event, outcome: "success", status: 200 }, client);
+      }
       return toOwnedShare(revoked);
     });
   }
@@ -192,7 +204,7 @@ export class SharesService {
         [share.owner_id, currentId],
       );
       const files = await client.query<FileDetails>(
-        `SELECT id, original_name, size_bytes, mime_type FROM files
+        `SELECT ${SHARED_FILE_COLUMNS} FROM current_files
          WHERE owner_id = $1 AND folder_id = $2 ORDER BY original_name, id`,
         [share.owner_id, currentId],
       );
@@ -205,9 +217,9 @@ export class SharesService {
     });
   }
 
-  async authorizeFile(recipientId: string, id: string, fileId: string, action: Action) {
-    if (!UUID.test(fileId)) throw shareUnavailable();
-    return this.readSnapshot(async (client) => {
+  async authorizeFile(recipientId: string, id: string, fileId: string, action: Action, transaction?: PoolClient) {
+    if (!UUID.test(id) || !UUID.test(fileId)) throw shareUnavailable();
+    const check = async (client: PoolClient) => {
       const share = await this.requireRecipientShare(client, recipientId, id);
       if (share.file_id && share.file_id !== fileId.toLowerCase()) throw shareUnavailable();
       const file = await this.findFile(client, share.owner_id, fileId);
@@ -222,7 +234,27 @@ export class SharesService {
         throw new ForbiddenException("This share does not allow editing.");
       }
       return file;
-    });
+    };
+    if (!transaction) return this.readSnapshot(check);
+
+    // The write transaction already locks the file owner, editor, and current file.
+    // Hold the link and applicable group membership through publication too.
+    const link = await transaction.query<{ recipient_group_id: string | null }>(
+      "SELECT recipient_group_id FROM shares WHERE id = $1 FOR SHARE",
+      [id],
+    );
+    const groupId = link.rows[0]?.recipient_group_id;
+    if (groupId) {
+      const membership = await transaction.query(
+        `SELECT 1 FROM internal_group_members AS member
+         JOIN internal_groups AS team ON team.id = member.group_id AND team.approved
+         WHERE member.group_id = $1 AND member.employee_id = $2
+         FOR SHARE OF member, team`,
+        [groupId, recipientId],
+      );
+      if (!membership.rowCount) throw shareUnavailable();
+    }
+    return check(transaction);
   }
 
   private readSnapshot<T>(work: (client: PoolClient) => Promise<T>) {
@@ -246,7 +278,7 @@ export class SharesService {
   private async requireRecipientShare(client: PoolClient, recipientId: string, id: string) {
     if (!UUID.test(id)) throw shareUnavailable();
     const share = (await client.query<RecipientShareRow>(
-      `SELECT share.*, sender.display_name AS owner_name, share.expires_at <= now() AS expired
+      `SELECT share.*, sender.display_name AS owner_name, share.expires_at <= clock_timestamp() AS expired
        FROM shares AS share
        JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
        JOIN employees AS recipient
@@ -268,8 +300,8 @@ export class SharesService {
 
   private async findFile(client: PoolClient, ownerId: string, id: string) {
     const file = (await client.query<FileRow>(
-      `SELECT id, folder_id, original_name, size_bytes, mime_type, sha256, blob_key
-       FROM files WHERE owner_id = $1 AND id = $2`,
+      `SELECT ${SHARED_FILE_COLUMNS}, owner_id, folder_id, sha256, blob_key
+       FROM current_files WHERE owner_id = $1 AND id = $2`,
       [ownerId, id],
     )).rows[0];
     if (!file) throw shareUnavailable();
@@ -354,13 +386,16 @@ function toOwnedShare(share: OwnedShareRow) {
   };
 }
 
-export function toSharedFile(file: FileDetails) {
+export function toSharedFile(file: Omit<FileDetails, "sha256" | "blob_key">) {
   return {
     id: file.id,
     name: file.original_name,
     type: "file" as const,
     size: Number(file.size_bytes),
     mimeType: file.mime_type,
+    revision: file.revision,
+    authorName: file.author_name,
+    revisedAt: file.revised_at.toISOString(),
   };
 }
 

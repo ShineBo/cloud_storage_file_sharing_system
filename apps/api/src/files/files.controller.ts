@@ -1,32 +1,16 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  Header,
-  Param,
-  Patch,
-  Post,
-  Query,
-  Req,
-  UnsupportedMediaTypeException,
-} from "@nestjs/common";
-import type { FastifyMultipartBaseOptions } from "@fastify/multipart";
+import { BadRequestException, Body, Controller, Get, Header, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import { AuditService } from "../audit/audit.service";
 import { AuthService } from "../auth/auth.service";
-import {
-  FilesService,
-  parseFileName,
-  parseFolderId,
-  UPLOAD_TIMEOUT_MS,
-  uploadTimedOut,
-} from "./files.service";
+import { FilesService, parseFileName, parseFolderId } from "./files.service";
+import { readBaseRevision, receiveUpload } from "./multipart-upload";
 
 @Controller("files")
 export class FilesController {
   constructor(
     private readonly auth: AuthService,
     private readonly files: FilesService,
+    private readonly audit: AuditService,
   ) {}
 
   @Get()
@@ -50,77 +34,66 @@ export class FilesController {
     @Query("folderId") folderId: unknown,
     @Query("size") size: unknown,
   ) {
-    const user = await this.auth.requireUser(request);
-    this.auth.requireSameOrigin(request);
-    if (!request.isMultipart()) {
-      throw new UnsupportedMediaTypeException("Send a multipart file upload.");
-    }
-
-    const destination = parseFolderId(folderId);
-    const declaredSize = parseDeclaredSize(size);
-    const cancel = new AbortController();
-    const expiresAt = new Date(Date.now() + UPLOAD_TIMEOUT_MS);
-    const onAborted = () => cancel.abort(uploadTimedOut());
-    const deadline = setTimeout(() => {
-      onAborted();
-      if (!request.raw.complete) request.raw.destroy();
-    }, UPLOAD_TIMEOUT_MS);
-    deadline.unref();
-    request.raw.once("aborted", onAborted);
-    if (request.raw.aborted) onAborted();
-
-    try {
-      const file = await this.files.upload(user.id, {
-        folderId: destination,
-        declaredSize,
-        expiresAt,
-        signal: cancel.signal,
-        parts: (limit) => {
-          const options: FastifyMultipartBaseOptions = {
-            // Busboy marks its boundary as truncated.
-            limits: { files: 1, fields: 0, fileSize: limit + 1 },
-            throwFileSizeLimit: false,
-          };
-          return request.parts(options);
-        },
-      });
+    return this.audit.run({ action: "upload", actorId: null, itemType: "file" }, async (event) => {
+      const user = await this.auth.requireUser(request);
+      event.actorId = user.id;
+      this.auth.requireSameOrigin(request);
+      const destination = parseFolderId(folderId);
+      const file = await receiveUpload(request, size, (transfer) =>
+        this.files.upload(user.id, { ...transfer, folderId: destination }, event));
       return { file };
-    } finally {
-      clearTimeout(deadline);
-      request.raw.off("aborted", onAborted);
-    }
+    }, null);
+  }
+
+  @Post(":id/revisions")
+  @Header("Cache-Control", "private, no-store")
+  async replace(
+    @Req() request: FastifyRequest,
+    @Param("id") id: string,
+    @Query("baseRevision") baseRevision: unknown,
+    @Query("size") size: unknown,
+  ) {
+    return this.audit.run({ action: "edit", actorId: null, itemType: "file", itemId: id }, async (event) => {
+      const owner = await this.auth.requireUser(request);
+      event.actorId = owner.id;
+      this.auth.requireSameOrigin(request);
+      const revision = readBaseRevision(baseRevision);
+      event.revision = revision;
+      const file = await receiveUpload(request, size, (transfer) =>
+        this.files.replace(owner.id, id, revision, transfer, async (client) => {
+          await this.auth.requireUser(request, client);
+        }, event));
+      return { file };
+    }, null);
   }
 
   @Patch(":id")
   @Header("Cache-Control", "private, no-store")
   async update(@Req() request: FastifyRequest, @Param("id") id: string, @Body() body: unknown) {
-    const user = await this.auth.requireUser(request);
-    this.auth.requireSameOrigin(request);
-    if (typeof body !== "object" || body === null || Array.isArray(body)) {
-      throw new BadRequestException("Send a file name or destination to update.");
-    }
-    const name = "name" in body ? parseFileName(body.name) : undefined;
-    const folderId = "folderId" in body ? parseFolderId(body.folderId) : undefined;
-    if (name === undefined && folderId === undefined) {
-      throw new BadRequestException("Send a file name or destination to update.");
-    }
-    return { file: await this.files.update(user.id, id, { name, folderId }) };
+    return this.audit.run({ action: "file.update", actorId: null, itemType: "file", itemId: id }, async (event) => {
+      const user = await this.auth.requireUser(request);
+      event.actorId = user.id;
+      this.auth.requireSameOrigin(request);
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        throw new BadRequestException("Send a file name or destination to update.");
+      }
+      const name = "name" in body ? parseFileName(body.name) : undefined;
+      const folderId = "folderId" in body ? parseFolderId(body.folderId) : undefined;
+      if (name === undefined && folderId === undefined) {
+        throw new BadRequestException("Send a file name or destination to update.");
+      }
+      return { file: await this.files.update(user.id, id, { name, folderId }, event) };
+    }, null);
   }
 
   @Get(":id/download")
   @Header("Cache-Control", "private, no-store")
   @Header("X-Content-Type-Options", "nosniff")
   async download(@Req() request: FastifyRequest, @Param("id") id: string) {
-    const user = await this.auth.requireUser(request);
-    return this.files.download(user.id, id);
+    return this.audit.run({ action: "download", actorId: null, itemType: "file", itemId: id }, async (event) => {
+      const user = await this.auth.requireUser(request);
+      event.actorId = user.id;
+      return this.files.download(user.id, id, event);
+    });
   }
-}
-
-function parseDeclaredSize(value: unknown) {
-  if (value === undefined) return undefined;
-  if (typeof value === "string" && /^\d+$/.test(value)) {
-    const size = Number(value);
-    if (Number.isSafeInteger(size) && size > 0) return size;
-  }
-  throw new BadRequestException("Declare the file size as a positive number of bytes.");
 }

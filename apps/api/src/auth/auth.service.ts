@@ -117,7 +117,10 @@ export class AuthService {
     return { location, cookie: authCookie("se_session", token, SESSION_MAX_AGE, secure) } as const;
   }
 
-  async requireUser(request: FastifyRequest): Promise<AuthenticatedUser> {
+  async requireUser(
+    request: FastifyRequest,
+    transaction?: Pick<DatabaseService, "query">,
+  ): Promise<AuthenticatedUser> {
     if (!request.headers.cookie) {
       throw new UnauthorizedException();
     }
@@ -127,14 +130,15 @@ export class AuthService {
       throw new UnauthorizedException();
     }
 
-    const result = await this.database.query<AuthenticatedUser>(
+    const result = await (transaction ?? this.database).query<AuthenticatedUser>(
       `
         SELECT employee.id, employee.username, employee.display_name AS "displayName"
         FROM auth_sessions AS session
         JOIN employees AS employee
           ON employee.issuer = session.issuer AND employee.subject = session.subject
         WHERE session.token_hash = $1 AND session.issuer = $2
-          AND session.expires_at > now() AND employee.active
+          AND session.expires_at > clock_timestamp() AND employee.active
+        ${transaction ? "FOR SHARE OF session" : ""}
       `,
       [hashAuthToken(token), issuer],
     );

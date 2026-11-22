@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
+import { AuditService } from "../audit/audit.service";
 import { DatabaseService } from "../database.service";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -22,7 +23,10 @@ type FolderInput = { name?: string; parentId?: string | null };
 
 @Injectable()
 export class FoldersService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly audit: AuditService,
+  ) {}
 
   async list(ownerId: string) {
     const result = await this.database.query<FolderRow>(
@@ -33,13 +37,13 @@ export class FoldersService {
     return result.rows.map(toFolder);
   }
 
-  async create(ownerId: string, input: unknown) {
+  async create(ownerId: string, input: unknown, eventId?: string) {
     const { name, parentId = null } = readFolderInput(input);
     if (name === undefined) {
       throw new BadRequestException("Enter a folder name.");
     }
 
-    return this.mutate(ownerId, async (client) => {
+    return this.mutate(ownerId, "folder.create", eventId, async (client) => {
       if (parentId !== null) await this.findOwnedFolder(client, ownerId, parentId);
       const result = await client.query<FolderRow>(
         `INSERT INTO folders (id, owner_id, parent_id, name)
@@ -47,18 +51,18 @@ export class FoldersService {
          RETURNING id, name, parent_id, created_at`,
         [randomUUID(), ownerId, parentId, name],
       );
-      return toFolder(result.rows[0]);
+      return result.rows[0];
     });
   }
 
-  async update(ownerId: string, id: string, input: unknown) {
+  async update(ownerId: string, id: string, input: unknown, eventId?: string) {
     const folderId = readFolderId(id);
     const { name, parentId } = readFolderInput(input);
     if (name === undefined && parentId === undefined) {
       throw new BadRequestException("Enter a name or select a destination folder.");
     }
 
-    return this.mutate(ownerId, async (client) => {
+    return this.mutate(ownerId, "folder.update", eventId, async (client) => {
       const folder = await this.findOwnedFolder(client, ownerId, folderId);
       if (parentId !== undefined && parentId !== null && parentId !== folder.parent_id) {
         await this.findOwnedFolder(client, ownerId, parentId);
@@ -76,14 +80,16 @@ export class FoldersService {
           parentId === undefined ? folder.parent_id : parentId,
         ],
       );
-      return toFolder(result.rows[0]);
+      return result.rows[0];
     });
   }
 
-  private async mutate<T>(
+  private async mutate(
     ownerId: string,
-    change: (client: PoolClient) => Promise<T>,
-  ): Promise<T> {
+    action: "folder.create" | "folder.update",
+    eventId: string | undefined,
+    change: (client: PoolClient) => Promise<FolderRow>,
+  ) {
     try {
       return await this.database.transaction(async (client) => {
         // Serialize an owner's moves so a reciprocal move cannot invalidate the cycle check.
@@ -92,7 +98,17 @@ export class FoldersService {
           [ownerId],
         );
         if (owner.rowCount === 0) throw new UnauthorizedException();
-        return change(client);
+        const folder = await change(client);
+        await this.audit.record({
+          eventId,
+          action,
+          actorId: ownerId,
+          itemType: "folder",
+          itemId: folder.id,
+          outcome: "success",
+          status: action === "folder.create" ? 201 : 200,
+        }, client);
+        return toFolder(folder);
       });
     } catch (error) {
       if (

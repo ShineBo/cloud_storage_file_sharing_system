@@ -803,3 +803,16 @@ h2 {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.revision-details {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.revision-dialog .panel-description {
+  margin-top: 8px;
+}
+
+.shared-revision-notice {
+  margin-bottom: 12px;
+}

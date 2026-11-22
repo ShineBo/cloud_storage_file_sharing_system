@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { AuditController } from "./audit/audit.controller";
+import { AuditService } from "./audit/audit.service";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { OidcService } from "./auth/oidc.service";
@@ -14,8 +16,8 @@ import { SharesService } from "./shares/shares.service";
 
 @Module({
   controllers: [
-    HealthController, AuthController, FilesController, FoldersController, SharesController, SharedContentController,
+    HealthController, AuthController, FilesController, FoldersController, SharesController, SharedContentController, AuditController,
   ],
-  providers: [DatabaseService, AuthService, OidcService, FilesService, FoldersService, SharesService],
+  providers: [DatabaseService, AuthService, OidcService, FilesService, FoldersService, SharesService, AuditService],
 })
 export class AppModule {}

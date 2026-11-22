@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Header, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import { AuditService } from "../audit/audit.service";
 import { AuthService } from "../auth/auth.service";
 import { SharesService } from "./shares.service";
 
@@ -8,6 +9,7 @@ export class SharesController {
   constructor(
     private readonly auth: AuthService,
     private readonly shares: SharesService,
+    private readonly audit: AuditService,
   ) {}
 
   @Get("recipients")
@@ -31,17 +33,23 @@ export class SharesController {
   @Post()
   @Header("Cache-Control", "private, no-store")
   async create(@Req() request: FastifyRequest, @Body() body: unknown) {
-    const user = await this.auth.requireUser(request);
-    this.auth.requireSameOrigin(request);
-    return { share: await this.shares.create(user.id, body) };
+    return this.audit.run({ action: "share.create", actorId: null, itemType: "share" }, async (event) => {
+      const user = await this.auth.requireUser(request);
+      event.actorId = user.id;
+      this.auth.requireSameOrigin(request);
+      return { share: await this.shares.create(user.id, body, event) };
+    }, null);
   }
 
   @Post(":id/revoke")
   @HttpCode(200)
   @Header("Cache-Control", "private, no-store")
   async revoke(@Req() request: FastifyRequest, @Param("id") id: string) {
-    const user = await this.auth.requireUser(request);
-    this.auth.requireSameOrigin(request);
-    return { share: await this.shares.revoke(user.id, id) };
+    return this.audit.run({ action: "share.revoke", actorId: null, itemType: "share" }, async (event) => {
+      const user = await this.auth.requireUser(request);
+      event.actorId = user.id;
+      this.auth.requireSameOrigin(request);
+      return { share: await this.shares.revoke(user.id, id, event) };
+    }, null);
   }
 }

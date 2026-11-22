@@ -19,6 +19,7 @@ import { isAbsolute, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { PoolClient } from "pg";
+import { AuditService, type AuditAttempt } from "../audit/audit.service";
 import { DatabaseService } from "../database.service";
 import { expectedFileType, verifyFileType } from "./file-media";
 import { officePreview } from "./office-preview";
@@ -27,7 +28,8 @@ const DEFAULT_MAX_FILE_BYTES = 2_000_000_000;
 const DEFAULT_QUOTA_BYTES = 20_000_000_000;
 export const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-const FILE_COLUMNS = "id, original_name, folder_id, size_bytes, sha256, mime_type, created_at";
+const FILE_COLUMNS = `id, original_name, folder_id, size_bytes, sha256, mime_type, created_at,
+                      revision, author_name, revised_at`;
 
 type FileRow = {
   id: string;
@@ -37,24 +39,28 @@ type FileRow = {
   sha256: string;
   mime_type: string;
   created_at: Date;
+  revision: number;
+  author_name: string;
+  revised_at: Date;
 };
 
 export type StoredBlob = Pick<FileRow, "original_name" | "size_bytes" | "sha256" | "mime_type"> & {
   blob_key: string;
 };
 
-type UploadContext = {
-  folderId: string | null;
+export type TransferContext = {
   declaredSize: number | undefined;
   expiresAt: Date;
   signal: AbortSignal;
   parts: (limit: number) => AsyncIterable<Multipart>;
 };
 
+type UploadContext = TransferContext & { folderId: string | null };
 type FileChanges = { name?: string; folderId?: string | null };
 type Reservation = { bytes: number; expiredIds: string[] };
 type StagedFile = { name: string; size: number; sha256: string; mimeType: string };
 type Queryable = Pick<DatabaseService, "query">;
+type UploadValidation<T> = (client: PoolClient) => Promise<T>;
 
 @Injectable()
 export class FilesService {
@@ -62,12 +68,15 @@ export class FilesService {
   private readonly maxFileBytes = readLimit("FILE_MAX_BYTES", DEFAULT_MAX_FILE_BYTES);
   private readonly quotaBytes = readLimit("FILE_QUOTA_BYTES", DEFAULT_QUOTA_BYTES);
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly audit: AuditService,
+  ) {}
 
   async list(ownerId: string, folderId: string | null) {
     await requireOwnedFolder(this.database, ownerId, folderId);
     const result = await this.database.query<FileRow>(
-      `SELECT ${FILE_COLUMNS} FROM files WHERE owner_id = $1
+      `SELECT ${FILE_COLUMNS} FROM current_files WHERE owner_id = $1
          AND folder_id IS NOT DISTINCT FROM $2::uuid ORDER BY created_at DESC, id DESC`,
       [ownerId, folderId],
     );
@@ -79,8 +88,82 @@ export class FilesService {
     return { maxFileBytes: this.maxFileBytes, quotaBytes: this.quotaBytes, ...usage };
   }
 
-  async upload(ownerId: string, context: UploadContext) {
-    const { declaredSize, folderId, signal } = context;
+  async upload(ownerId: string, context: UploadContext, auditEntry?: AuditAttempt) {
+    const { folderId } = context;
+    return this.saveUpload(
+      ownerId, ownerId, context,
+      (client) => requireOwnedFolder(client, ownerId, folderId),
+      async (client, _, completed, key) => {
+        const id = randomUUID();
+        await client.query(
+          `INSERT INTO files (id, owner_id, folder_id, original_name) VALUES ($1, $2, $3, $4)`,
+          [id, ownerId, folderId, completed.name],
+        );
+        await this.insertRevision(client, id, 1, ownerId, completed, key);
+        if (auditEntry) {
+          await this.audit.record({
+            ...auditEntry, actorId: ownerId, itemType: "file", itemId: id, revision: 1,
+            outcome: "success", status: 201,
+          }, client);
+        }
+        return this.findCurrent(client, ownerId, id);
+      },
+    );
+  }
+
+  async replace(
+    ownerId: string,
+    fileId: string,
+    baseRevision: number,
+    context: TransferContext,
+    authorize: UploadValidation<void>,
+    auditEntry: AuditAttempt,
+  ) {
+    if (!UUID.test(fileId)) throw fileNotFound();
+    if (!Number.isInteger(baseRevision) || baseRevision < 1 || baseRevision >= 2_147_483_647) {
+      throw new BadRequestException("Choose a valid file revision before publishing.");
+    }
+    const authorId = auditEntry.actorId;
+    if (!authorId) throw new UnauthorizedException("An active internal employee account is required.");
+
+    return this.saveUpload(
+      ownerId, authorId, context,
+      async (client) => {
+        await this.lockFile(client, ownerId, fileId);
+        await authorize(client);
+        const current = await this.findCurrent(client, ownerId, fileId);
+        if (current.revision !== baseRevision) {
+          throw new ConflictException({
+            code: "STALE_REVISION",
+            message: "This file has a newer revision. Reload it before publishing.",
+          });
+        }
+        return current;
+      },
+      async (client, current, completed, key) => {
+        if (completed.mimeType !== current.mime_type) {
+          throw new UnsupportedMediaTypeException("Choose a replacement with the file's original type.");
+        }
+        const revision = baseRevision + 1;
+        await this.insertRevision(client, fileId, revision, authorId, completed, key);
+        await client.query("UPDATE files SET current_revision = $2 WHERE id = $1", [fileId, revision]);
+        await this.audit.record({
+          ...auditEntry, actorId: authorId, itemType: "file", itemId: fileId, revision,
+          outcome: "success", status: 201,
+        }, client);
+        return this.findCurrent(client, ownerId, fileId);
+      },
+    );
+  }
+
+  private async saveUpload<T>(
+    ownerId: string,
+    authorId: string,
+    context: TransferContext,
+    validateTarget: UploadValidation<T>,
+    publish: (client: PoolClient, target: T, upload: StagedFile, key: string) => Promise<FileRow>,
+  ) {
+    const { declaredSize, signal } = context;
     if (declaredSize !== undefined && declaredSize > this.maxFileBytes) {
       throw this.fileTooLarge();
     }
@@ -93,8 +176,12 @@ export class FilesService {
     let mayHaveCommitted = false;
 
     try {
-      const reservation = await this.reserve(ownerId, key, context);
-      await Promise.all(reservation.expiredIds.map((id) => this.remove(join(storage, `${id}.upload`))));
+      const reservation = await this.reserve(ownerId, authorId, key, context, validateTarget);
+      // An expired reservation was never consumed by a committed publication.
+      await Promise.all(reservation.expiredIds.flatMap((id) => [
+        this.remove(join(storage, `${id}.upload`)),
+        this.remove(join(storage, id)),
+      ]));
       signal.throwIfAborted();
 
       let upload: StagedFile | undefined;
@@ -112,8 +199,8 @@ export class FilesService {
 
       const completed = upload;
       const row = await this.database.transaction(async (client) => {
-        await lockActiveEmployee(client, ownerId);
-        await requireOwnedFolder(client, ownerId, folderId);
+        await lockActiveEmployees(client, ownerId, authorId);
+        const target = await validateTarget(client);
         const active = await client.query(
           `DELETE FROM file_upload_reservations
            WHERE id = $1 AND owner_id = $2 AND expires_at > clock_timestamp() RETURNING id`,
@@ -123,25 +210,19 @@ export class FilesService {
         signal.throwIfAborted();
         await rename(stagedPath, blobPath);
         publishedBlob = true;
-        const inserted = await client.query<FileRow>(
-          `INSERT INTO files (id, owner_id, folder_id, original_name, blob_key, size_bytes, sha256, mime_type)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${FILE_COLUMNS}`,
-          [
-            randomUUID(), ownerId, folderId, completed.name, key,
-            completed.size, completed.sha256, completed.mimeType,
-          ],
-        );
+        const directory = await open(storage, constants.O_RDONLY | constants.O_DIRECTORY);
+        await directory.sync().finally(() => directory.close());
+        const saved = await publish(client, target, completed, key);
         signal.throwIfAborted();
         mayHaveCommitted = true;
-        return inserted.rows[0];
+        return saved;
       });
       return toPublicFile(row);
     } catch (error) {
       if (publishedBlob && !mayHaveCommitted) {
         await this.remove(blobPath);
       } else if (publishedBlob) {
-        // A lost COMMIT response can follow a committed insert.
-        this.logger.error("Could not confirm the file metadata insert.");
+        await this.reconcilePublication(ownerId, key, blobPath);
       }
       if (signal.aborted) throw uploadTimedOut();
       throw error;
@@ -153,15 +234,12 @@ export class FilesService {
     }
   }
 
-  async update(ownerId: string, id: string, changes: FileChanges) {
+  async update(ownerId: string, id: string, changes: FileChanges, auditEntry?: AuditAttempt) {
     if (!UUID.test(id)) throw fileNotFound();
     return this.database.transaction(async (client) => {
-      const found = await client.query<FileRow>(
-        `SELECT ${FILE_COLUMNS} FROM files WHERE owner_id = $1 AND id = $2 FOR UPDATE`,
-        [ownerId, id],
-      );
-      const file = found.rows[0];
-      if (!file) throw fileNotFound();
+      await lockActiveEmployees(client, ownerId, ownerId);
+      await this.lockFile(client, ownerId, id);
+      const file = await this.findCurrent(client, ownerId, id);
 
       const name = changes.name ?? file.original_name;
       if (changes.name !== undefined && expectedFileType(name).mimeType !== file.mime_type) {
@@ -169,24 +247,50 @@ export class FilesService {
       }
       const folderId = changes.folderId === undefined ? file.folder_id : changes.folderId;
       await requireOwnedFolder(client, ownerId, folderId);
-      const result = await client.query<FileRow>(
-        `UPDATE files SET original_name = $3, folder_id = $4 WHERE owner_id = $1 AND id = $2
-         RETURNING ${FILE_COLUMNS}`,
+      await client.query(
+        `UPDATE files SET original_name = $3, folder_id = $4 WHERE owner_id = $1 AND id = $2`,
         [ownerId, id, name, folderId],
       );
-      return toPublicFile(result.rows[0]);
+      if (auditEntry) {
+        await this.audit.record({
+          ...auditEntry, actorId: ownerId, itemType: "file", itemId: id, revision: file.revision,
+          outcome: "success", status: 200,
+        }, client);
+      }
+      return toPublicFile({ ...file, original_name: name, folder_id: folderId });
     });
   }
 
-  async download(ownerId: string, id: string) {
+  async download(ownerId: string, id: string, auditEntry?: AuditAttempt) {
     if (!UUID.test(id)) throw fileNotFound();
-    const result = await this.database.query<FileRow & { blob_key: string }>(
-      `SELECT ${FILE_COLUMNS}, blob_key FROM files WHERE owner_id = $1 AND id = $2`,
+    const file = await this.findCurrent(this.database, ownerId, id);
+    if (auditEntry) auditEntry.revision = file.revision;
+    return this.serveAuthorized(file, "download");
+  }
+
+  private async insertRevision(
+    client: PoolClient, fileId: string, revision: number, authorId: string, file: StagedFile, key: string,
+  ) {
+    await client.query(
+      `INSERT INTO file_revisions (file_id, revision, author_id, blob_key, size_bytes, sha256, mime_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [fileId, revision, authorId, key, file.size, file.sha256, file.mimeType],
+    );
+  }
+
+  private async findCurrent(database: Queryable, ownerId: string, id: string) {
+    const result = await database.query<FileRow & { blob_key: string }>(
+      `SELECT ${FILE_COLUMNS}, blob_key FROM current_files WHERE owner_id = $1 AND id = $2`,
       [ownerId, id],
     );
     const file = result.rows[0];
     if (!file) throw fileNotFound();
-    return this.serveAuthorized(file, "download");
+    return file;
+  }
+
+  private async lockFile(client: PoolClient, ownerId: string, id: string) {
+    const result = await client.query("SELECT id FROM files WHERE owner_id = $1 AND id = $2 FOR UPDATE", [ownerId, id]);
+    if (!result.rowCount) throw fileNotFound();
   }
 
   async serveAuthorized(file: StoredBlob, action: "view" | "download") {
@@ -234,10 +338,13 @@ export class FilesService {
     }
   }
 
-  private async reserve(ownerId: string, key: string, context: UploadContext): Promise<Reservation> {
+  private async reserve(
+    ownerId: string, authorId: string, key: string, context: TransferContext,
+    validateTarget: UploadValidation<unknown>,
+  ): Promise<Reservation> {
     return this.database.transaction(async (client) => {
-      await lockActiveEmployee(client, ownerId);
-      await requireOwnedFolder(client, ownerId, context.folderId);
+      await lockActiveEmployees(client, ownerId, authorId);
+      await validateTarget(client);
       context.signal.throwIfAborted();
       const expired = await client.query<{ id: string }>(
         `DELETE FROM file_upload_reservations WHERE owner_id = $1
@@ -261,7 +368,8 @@ export class FilesService {
   private async readUsage(database: Queryable, ownerId: string) {
     const result = await database.query<{ used: string; reserved: string }>(
       `SELECT
-         (SELECT COALESCE(SUM(size_bytes), 0)::text FROM files WHERE owner_id = $1) AS used,
+         (SELECT COALESCE(SUM(revision.size_bytes), 0)::text FROM file_revisions AS revision
+          JOIN files ON files.id = revision.file_id WHERE files.owner_id = $1) AS used,
          (SELECT COALESCE(SUM(reserved_bytes), 0)::text FROM file_upload_reservations
           WHERE owner_id = $1 AND expires_at > clock_timestamp()) AS reserved`,
       [ownerId],
@@ -338,6 +446,17 @@ export class FilesService {
     });
   }
 
+  private async reconcilePublication(ownerId: string, key: string, path: string) {
+    // The original write might have committed before the database connection closed.
+    await this.database.transaction(async (client) => {
+      await client.query("SELECT id FROM employees WHERE id = $1 FOR UPDATE", [ownerId]);
+      const published = await client.query("SELECT 1 FROM file_revisions WHERE blob_key = $1", [key]);
+      if (!published.rowCount) await this.remove(path);
+    }).catch(() => {
+      this.logger.error("Could not reconcile a file after an unconfirmed publish.");
+    });
+  }
+
   private async releaseReservation(ownerId: string, key: string) {
     await this.database.query(
       "DELETE FROM file_upload_reservations WHERE id = $1 AND owner_id = $2",
@@ -393,12 +512,16 @@ async function requireOwnedFolder(database: Queryable, ownerId: string, folderId
   if (!result.rowCount) throw new NotFoundException("Folder not found.");
 }
 
-async function lockActiveEmployee(client: PoolClient, ownerId: string) {
+async function lockActiveEmployees(client: PoolClient, ownerId: string, authorId: string) {
+  // Lock in UUID order so two employees can safely replace each other's shared files.
   const result = await client.query(
-    "SELECT id FROM employees WHERE id = $1 AND active FOR UPDATE",
-    [ownerId],
+    "SELECT id FROM employees WHERE id IN ($1, $2) AND active ORDER BY id FOR UPDATE",
+    [ownerId, authorId],
   );
-  if (!result.rowCount) throw new UnauthorizedException("An active internal employee account is required.");
+  const expected = ownerId === authorId ? 1 : 2;
+  if (result.rowCount !== expected) {
+    throw new UnauthorizedException("An active internal employee account is required.");
+  }
 }
 
 async function hashStoredFile(handle: FileHandle, size: number) {
@@ -433,5 +556,8 @@ function toPublicFile(file: FileRow) {
     createdAt: file.created_at.toISOString(),
     folderId: file.folder_id,
     mimeType: file.mime_type,
+    revision: file.revision,
+    authorName: file.author_name,
+    revisedAt: file.revised_at.toISOString(),
   };
 }

@@ -22,6 +22,16 @@ async function seedClassDirectory(db) {
     );
   }
 
+  const securityReviewer = users.find(({ username }) => username === "security-reviewer");
+  if (securityReviewer) {
+    await db.query(
+      `INSERT INTO audit_reviewers (employee_id)
+       SELECT id FROM employees WHERE issuer = $1 AND subject = $2
+       ON CONFLICT DO NOTHING`,
+      [process.env.OIDC_ISSUER, securityReviewer.id],
+    );
+  }
+
   const createdGroup = await db.query(
     `INSERT INTO internal_groups (id, issuer, name, approved)
      VALUES ($1, $2, 'Design Team', true)
