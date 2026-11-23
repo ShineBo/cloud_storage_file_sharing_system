@@ -37,7 +37,7 @@ async function accessError(response: Response, loginStatus?: string | null) {
     case 401:
       return "Sign in with your organization account to open this link.";
     case 403:
-      return "Your sharing permission does not allow this action.";
+      return "Ask the sender to check your permission for this action.";
     case 404:
       return "This item is unavailable to your account. Ask the sender to check who has access.";
     case 410: {

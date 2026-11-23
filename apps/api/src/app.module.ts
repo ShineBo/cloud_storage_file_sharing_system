@@ -10,6 +10,8 @@ import { FoldersController } from "./folders/folders.controller";
 import { FoldersService } from "./folders/folders.service";
 import { DatabaseService } from "./database.service";
 import { HealthController } from "./health.controller";
+import { NotificationService } from "./notifications/notification.service";
+import { SmtpService } from "./notifications/smtp.service";
 import { SharedContentController } from "./shares/shared-content.controller";
 import { SharesController } from "./shares/shares.controller";
 import { SharesService } from "./shares/shares.service";
@@ -18,6 +20,6 @@ import { SharesService } from "./shares/shares.service";
   controllers: [
     HealthController, AuthController, FilesController, FoldersController, SharesController, SharedContentController, AuditController,
   ],
-  providers: [DatabaseService, AuthService, OidcService, FilesService, FoldersService, SharesService, AuditService],
+  providers: [DatabaseService, AuthService, OidcService, FilesService, FoldersService, SharesService, AuditService, SmtpService, NotificationService],
 })
 export class AppModule {}

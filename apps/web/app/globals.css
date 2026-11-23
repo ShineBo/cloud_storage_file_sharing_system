@@ -679,6 +679,26 @@ h2 {
   accent-color: var(--accent);
 }
 
+.share-create-actions,
+.share-delivery,
+.share-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.share-create-actions .file-meta,
+.share-delivery .file-meta {
+  flex: 1 1 210px;
+}
+
+.share-delivery,
+.share-access-failure {
+  margin-top: 8px;
+}
+
 .share-history {
   margin-top: 18px;
   border-top: 1px solid var(--line);

@@ -44,6 +44,14 @@ services:
       OIDC_BACKCHANNEL_URL: http://identity:8080
       OIDC_CLIENT_ID: cloud-storage
       OIDC_CLIENT_SECRET: ${CLASS_OIDC_CLIENT_SECRET:?Run npm run local:configure}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_TLS: ${SMTP_TLS:-plain}
+      SMTP_FROM: ${SMTP_FROM:-cloud-storage@example.test}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SECURITY_ALERT_TO: ${SECURITY_ALERT_TO-security-reviewer@example.test}
+      SECURITY_ALERT_RULES: ${SECURITY_ALERT_RULES-denied-shared-access,inactive-share-access}
       FILE_STORAGE_PATH: /var/lib/cloud-storage/files
       FILE_MAX_BYTES: ${FILE_MAX_BYTES:-2000000000}
       FILE_QUOTA_BYTES: ${FILE_QUOTA_BYTES:-20000000000}

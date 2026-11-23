@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   GoneException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -12,6 +13,7 @@ import type { PoolClient } from "pg";
 import { AuditService, type AuditAttempt } from "../audit/audit.service";
 import { DatabaseService } from "../database.service";
 import type { StoredBlob } from "../files/files.service";
+import { NotificationService, type ShareDelivery } from "../notifications/notification.service";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const DEFAULT_EXPIRY_DAYS = 30;
@@ -39,6 +41,7 @@ type ShareRow = {
   allow_download: boolean;
   expires_at: Date;
   revoked_at: Date | null;
+  last_access_failure_at: Date | null;
 };
 type OwnedShareRow = ShareRow & { recipient_name: string };
 type RecipientShareRow = ShareRow & { owner_name: string; expired: boolean };
@@ -56,7 +59,13 @@ const OWNED_SHARE_SQL = `
 
 @Injectable()
 export class SharesService {
-  constructor(private readonly database: DatabaseService, private readonly audit: AuditService) {}
+  private readonly logger = new Logger(SharesService.name);
+
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationService,
+  ) {}
 
   async recipients(ownerId: string) {
     const [employees, groups] = await Promise.all([
@@ -109,7 +118,8 @@ export class SharesService {
         ) {
           throw new ConflictException("This share request was already used with different details.");
         }
-        return toOwnedShare(existing);
+        const [share] = await this.withDelivery(client, [existing]);
+        return share;
       }
 
       await this.requireOwnedItem(client, ownerId, input);
@@ -134,8 +144,10 @@ export class SharesService {
           groupId, input.permission, input.allowDownload, DEFAULT_EXPIRY_DAYS,
         ],
       )).rows[0];
+      await this.notifications.queueShare(client, saved.id);
       await this.audit.record({ ...event, outcome: "success", status: 201 }, client);
-      return toOwnedShare({ ...saved, recipient_name: recipient.name });
+      const [share] = await this.withDelivery(client, [{ ...saved, recipient_name: recipient.name }]);
+      return share;
     });
   }
 
@@ -149,7 +161,7 @@ export class SharesService {
          ORDER BY share.created_at DESC, share.id`,
         [ownerId, item.itemId],
       );
-      return result.rows.map(toOwnedShare);
+      return this.withDelivery(client, result.rows);
     });
   }
 
@@ -174,8 +186,50 @@ export class SharesService {
         event.itemId = revoked.file_id ?? revoked.folder_id;
         await this.audit.record({ ...event, outcome: "success", status: 200 }, client);
       }
-      return toOwnedShare(revoked);
+      const [share] = await this.withDelivery(client, [revoked]);
+      return share;
     });
+  }
+
+  async retryDelivery(ownerId: string, id: string) {
+    if (!UUID.test(id)) throw shareUnavailable();
+    return this.database.transaction(async (client) => {
+      const current = (await client.query<{ revoked_at: Date | null; expired: boolean }>(
+        `SELECT share.revoked_at, share.expires_at <= clock_timestamp() AS expired
+         FROM shares AS share
+         JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
+         WHERE share.id = $1 AND share.owner_id = $2
+         FOR NO KEY UPDATE OF share`,
+        [id, ownerId],
+      )).rows[0];
+      if (!current) throw shareUnavailable();
+      if (current.revoked_at || current.expired) {
+        throw new GoneException("This link is no longer active. Create a new share before sending an email.");
+      }
+
+      await this.notifications.retryShare(client, id.toLowerCase());
+      const updated = (await client.query<OwnedShareRow>(
+        `${OWNED_SHARE_SQL} WHERE share.id = $1 AND share.owner_id = $2`,
+        [id, ownerId],
+      )).rows[0];
+      const [share] = await this.withDelivery(client, [updated]);
+      return share;
+    });
+  }
+
+  async recordAccessFailure(id: string): Promise<boolean> {
+    if (!UUID.test(id)) return false;
+    try {
+      const result = await this.database.query(
+        `UPDATE shares SET last_access_failure_at = clock_timestamp()
+         WHERE id = $1 AND issuer = $2`,
+        [id, process.env.OIDC_ISSUER?.trim()],
+      );
+      return Boolean(result.rowCount);
+    } catch {
+      this.logger.warn("Could not save share access feedback.");
+      return false;
+    }
   }
 
   async browse(recipientId: string, id: string, folderId: unknown) {
@@ -263,6 +317,11 @@ export class SharesService {
       await client.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
       return work(client);
     });
+  }
+
+  private async withDelivery(client: PoolClient, rows: OwnedShareRow[]) {
+    const delivery = await this.notifications.shareStatus(client, rows.map(({ id }) => id));
+    return rows.map((row) => toOwnedShare(row, delivery.get(row.id)));
   }
 
   private async requireOwnedItem(client: PoolClient, ownerId: string, { itemType, itemId }: ItemReference) {
@@ -374,7 +433,10 @@ function shareUnavailable() {
   return new NotFoundException("This item or share link is unavailable for your account.");
 }
 
-function toOwnedShare(share: OwnedShareRow) {
+function toOwnedShare(
+  share: OwnedShareRow,
+  delivery: ShareDelivery = { status: "not_sent", sent: 0, total: 0 },
+) {
   return {
     id: share.id,
     link: `/shared/${share.id}`,
@@ -383,6 +445,8 @@ function toOwnedShare(share: OwnedShareRow) {
     allowDownload: share.allow_download,
     expiresAt: share.expires_at.toISOString(),
     revokedAt: share.revoked_at?.toISOString() ?? null,
+    delivery,
+    lastAccessFailureAt: share.last_access_failure_at?.toISOString() ?? null,
   };
 }
 

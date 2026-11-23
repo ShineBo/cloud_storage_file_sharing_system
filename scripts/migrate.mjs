@@ -14,11 +14,13 @@ async function seedClassDirectory(db) {
     if (user.username === "eve") continue;
 
     await db.query(
-      `INSERT INTO employees (id, issuer, subject, username, display_name, active)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (issuer, subject) DO NOTHING`,
+      `INSERT INTO employees (id, issuer, subject, username, display_name, active, notification_email)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (issuer, subject) DO UPDATE
+       SET notification_email = EXCLUDED.notification_email
+       WHERE employees.notification_email IS NULL`,
       [randomUUID(), process.env.OIDC_ISSUER, user.id, user.username,
-        `${user.firstName} ${user.lastName}`, user.username !== "dana"],
+        `${user.firstName} ${user.lastName}`, user.username !== "dana", user.email ?? null],
     );
   }
 

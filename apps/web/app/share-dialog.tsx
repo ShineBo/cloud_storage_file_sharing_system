@@ -4,6 +4,11 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 
 type RecipientType = "employee" | "group";
 type Permission = "view" | "edit";
+type ShareDelivery = {
+  status: "not_sent" | "pending" | "sent" | "failed" | "partial";
+  sent: number;
+  total: number;
+};
 
 type RecipientDirectory = {
   employees: { id: string; username: string; displayName: string }[];
@@ -18,6 +23,8 @@ type Share = {
   allowDownload: boolean;
   expiresAt: string;
   revokedAt: string | null;
+  delivery: ShareDelivery;
+  lastAccessFailureAt: string | null;
 };
 
 type ShareDialogProps = {
@@ -26,6 +33,8 @@ type ShareDialogProps = {
   onSessionExpired: () => void;
 };
 
+const deliveryPollInterval = 1500;
+const deliveryPollLimit = 20;
 const expiryFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 async function shareError(response: Response, fallback: string) {
@@ -38,6 +47,23 @@ async function shareError(response: Response, fallback: string) {
 
 function absoluteLink(share: Share) {
   return new URL(share.link, window.location.origin).href;
+}
+
+function emailStatusText(delivery: ShareDelivery, active: boolean) {
+  switch (delivery.status) {
+    case "not_sent":
+      return "Email hasn’t been sent.";
+    case "pending":
+      return "Email queued.";
+    case "sent":
+      return delivery.total > 1
+        ? `Email accepted for all ${delivery.total} recipients.`
+        : "Email accepted for delivery.";
+    case "partial":
+      return `Email accepted for ${delivery.sent} of ${delivery.total} recipients.${active ? " Retry or copy the link." : ""}`;
+    case "failed":
+      return active ? "Email delivery failed. Retry or copy the link." : "Email delivery failed.";
+  }
 }
 
 export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProps) {
@@ -55,6 +81,11 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
 
+  const sharesUrl = `/api/shares?${new URLSearchParams({ itemType: item.type, itemId: item.data.id })}`;
+  const hasPendingDelivery = shares.some((share) =>
+    share.delivery.status === "pending" && !share.revokedAt && Date.parse(share.expiresAt) > Date.now(),
+  );
+
   const recipients = recipientType === "employee"
     ? directory?.employees.map((employee) => ({
       id: employee.id,
@@ -70,14 +101,13 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
 
   useEffect(() => {
     const controller = new AbortController();
-    const params = new URLSearchParams({ itemType: item.type, itemId: item.data.id });
 
     async function loadShares() {
       try {
         const options = { cache: "no-store", signal: controller.signal } as const;
         const [directoryResponse, sharesResponse] = await Promise.all([
           fetch("/api/shares/recipients", options),
-          fetch(`/api/shares?${params}`, options),
+          fetch(sharesUrl, options),
         ]);
         if (controller.signal.aborted) return;
         if (directoryResponse.status === 401 || sharesResponse.status === 401) {
@@ -99,7 +129,39 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
 
     void loadShares();
     return () => controller.abort();
-  }, [attempt, item.type, item.data.id, onSessionExpired]);
+  }, [attempt, sharesUrl, onSessionExpired]);
+
+  useEffect(() => {
+    if (!hasPendingDelivery || busy) return;
+    const controller = new AbortController();
+    let remaining = deliveryPollLimit;
+    let timer: ReturnType<typeof setTimeout>;
+
+    async function poll() {
+      try {
+        const response = await fetch(sharesUrl, { cache: "no-store", signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (response.status === 401) {
+          onSessionExpired();
+          return;
+        }
+        if (response.ok) {
+          const { shares: latest } = await response.json() as { shares: Share[] };
+          if (controller.signal.aborted) return;
+          setShares(latest);
+        }
+      } catch {
+        // The owner can refresh status if a connection problem outlasts this poll.
+      }
+      if (!controller.signal.aborted && --remaining > 0) timer = setTimeout(poll, deliveryPollInterval);
+    }
+
+    timer = setTimeout(poll, deliveryPollInterval);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [sharesUrl, hasPendingDelivery, busy, onSessionExpired]);
 
   async function createShare(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -170,6 +232,50 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
     }
   }
 
+  async function refreshStatus() {
+    if (busy) return;
+    setError(undefined);
+    setBusy(true);
+    try {
+      const response = await fetch(sharesUrl, { cache: "no-store" });
+      if (response.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      if (!response.ok) throw new Error("Could not load link status.");
+      const { shares: latest } = await response.json() as { shares: Share[] };
+      setShares(latest);
+    } catch {
+      setError("Link status could not be refreshed. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryDelivery(share: Share) {
+    if (busy) return;
+    setError(undefined);
+    setNotice(undefined);
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/shares/${encodeURIComponent(share.id)}/delivery/retry`, { method: "POST" });
+      if (response.status === 401) {
+        onSessionExpired();
+        return;
+      }
+      if (!response.ok) {
+        setError(await shareError(response, "Email could not be queued. Try again or copy the link."));
+        return;
+      }
+      const { share: updated } = await response.json() as { share: Share };
+      setShares((previous) => previous.map((entry) => entry.id === updated.id ? updated : entry));
+    } catch {
+      setError("Email status could not be confirmed. Refresh status or copy the link.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyLink(share: Share) {
     setError(undefined);
     setNotice(undefined);
@@ -180,7 +286,7 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
       const input = dialogRef.current?.querySelector<HTMLInputElement>(`#link-${share.id}`);
       input?.focus();
       input?.select();
-      setNotice("Copy the selected link using your keyboard.");
+      setNotice("Copy the link from the selected field.");
     }
   }
 
@@ -253,7 +359,8 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
                 Allow download
               </label>
             </div>
-            <div className="dialog-actions">
+            <div className="dialog-actions share-create-actions">
+              <p className="file-meta">Creating a link also attempts email delivery.</p>
               <button className="button button-primary" type="submit" disabled={busy || !recipientId}>Create link</button>
             </div>
           </form>
@@ -261,12 +368,19 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
           {notice && <p className="notice notice-success" role="status">{notice}</p>}
           {shares.length > 0 && (
             <section className="share-history" aria-labelledby="share-history-title">
-              <h3 id="share-history-title">Shared links</h3>
+              <div className="share-history-heading">
+                <h3 id="share-history-title">Shared links</h3>
+                <button className="button button-secondary" type="button" disabled={busy} onClick={() => void refreshStatus()}>
+                  Refresh status
+                </button>
+              </div>
               <ul>
                 {shares.map((share) => {
                   const expiry = new Date(share.expiresAt);
                   const expired = expiry.getTime() <= Date.now();
                   const active = !share.revokedAt && !expired;
+                  const canSend = share.delivery.status === "not_sent" || share.delivery.status === "failed" ||
+                    share.delivery.status === "partial";
                   return (
                     <li key={share.id}>
                       <strong>{share.recipientName}</strong>
@@ -276,6 +390,31 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
                         {share.revokedAt ? " · Revoked" : expired ? " · Expired" : " · Expires "}
                         {active && <time dateTime={share.expiresAt}>{expiryFormat.format(expiry)}</time>}
                       </p>
+                      <div className="share-delivery">
+                        <p className="file-meta" role="status">{emailStatusText(share.delivery, active)}</p>
+                        {active && canSend && (
+                          <button
+                            className="button button-secondary"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void retryDelivery(share)}
+                          >
+                            {share.delivery.status === "not_sent" ? "Send email" : "Retry email"}
+                          </button>
+                        )}
+                      </div>
+                      {share.lastAccessFailureAt && (
+                        <p className="file-meta share-access-failure">
+                          An access attempt failed on{" "}
+                          <time dateTime={share.lastAccessFailureAt}>
+                            {expiryFormat.format(new Date(share.lastAccessFailureAt))}
+                          </time>
+                          .
+                          {active
+                            ? " Check the link and ask your recipient to confirm their work account."
+                            : " Create a new link if access is still needed."}
+                        </p>
+                      )}
                       {active && (
                         <div className="share-link">
                           <input

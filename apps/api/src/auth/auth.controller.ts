@@ -10,13 +10,19 @@ import {
   Res,
 } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { AuditService } from "../audit/audit.service";
+import { SharesService } from "../shares/shares.service";
 import { AuthService, shareLoginPath } from "./auth.service";
 
 @Controller("auth")
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly shares: SharesService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get("login")
   async login(
@@ -44,6 +50,13 @@ export class AuthController {
         return reply.header("Set-Cookie", result.cookie).redirect(result.location, 302);
       }
       if (result?.outcome === "unavailable") this.logger.warn("Could not complete sign-in.");
+      if (result?.outcome === "denied" && result.location.startsWith("/shared/")) {
+        const shareId = result.location.slice("/shared/".length);
+        if (await this.shares.recordAccessFailure(shareId)) {
+          await this.audit.record({ action: "share.open", actorId: null, itemType: "share", outcome: "denied", status: 401 })
+            .catch(() => undefined);
+        }
+      }
       return reply.redirect(`${result?.location ?? "/"}?auth=${result?.outcome ?? "denied"}`, 302);
     } catch {
       this.logger.warn("Could not complete sign-in.");

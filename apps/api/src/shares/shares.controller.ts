@@ -41,6 +41,15 @@ export class SharesController {
     }, null);
   }
 
+  @Post(":id/delivery/retry")
+  @HttpCode(200)
+  @Header("Cache-Control", "private, no-store")
+  async retryDelivery(@Req() request: FastifyRequest, @Param("id") id: string) {
+    const user = await this.auth.requireUser(request);
+    this.auth.requireSameOrigin(request);
+    return { share: await this.shares.retryDelivery(user.id, id) };
+  }
+
   @Post(":id/revoke")
   @HttpCode(200)
   @Header("Cache-Control", "private, no-store")

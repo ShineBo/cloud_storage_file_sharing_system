@@ -6,6 +6,7 @@ const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 type AuditItemType = "file" | "folder" | "share";
 type AuditOutcome = "success" | "denied" | "failed";
+type Risk = "denied-shared-access" | "inactive-share-access";
 export type AuditAction =
   | "upload"
   | "file.update"
@@ -26,6 +27,7 @@ export type AuditAttempt = {
   itemType: AuditItemType;
   itemId?: string | null;
   revision?: number | null;
+  risk?: Risk;
 };
 
 export type AuditEntry = AuditAttempt & {
@@ -44,29 +46,40 @@ type AuditEventRow = {
   status: number;
   revision: number | null;
   occurredAt: Date;
+  alertRule: Risk | null;
+  alertStatus: string | null;
 };
 
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
+  private readonly alertRules = new Set(process.env.SECURITY_ALERT_RULES?.split(",").map((rule) => rule.trim()));
 
   constructor(private readonly database: DatabaseService) {}
 
   async record(event: AuditEntry, db: Pick<DatabaseService, "query"> = this.database): Promise<void> {
     const itemId = event.itemType === "share" ? null : auditItemId(event.itemId);
+    const alertRule = event.outcome === "denied" && event.risk && this.alertRules.has(event.risk)
+      ? event.risk : null;
     try {
-      // Preserve the recorded actor even when the item's or account's lifecycle changes.
+      // Queue a configured alert only when its original audit record is inserted.
       await db.query(
-        `INSERT INTO audit_events (
-           id, identity_issuer, actor_id, actor_name, item_type, item_id, action, outcome, status, revision
+        `WITH recorded AS (
+           INSERT INTO audit_events (
+             id, identity_issuer, actor_id, actor_name, item_type, item_id, action, outcome, status, revision
+           )
+           SELECT $1, COALESCE(actor.issuer, $2), $3, actor.display_name, $4, $5, $6, $7, $8, $9
+           FROM (VALUES (1)) AS source(value)
+           LEFT JOIN employees AS actor ON actor.id = $3
+           ON CONFLICT (id) DO NOTHING
+           RETURNING id
          )
-         SELECT $1, COALESCE(actor.issuer, $2), $3, actor.display_name, $4, $5, $6, $7, $8, $9
-         FROM (VALUES (1)) AS source(value)
-         LEFT JOIN employees AS actor ON actor.id = $3
-         ON CONFLICT (id) DO NOTHING`,
+         INSERT INTO security_alerts (audit_event_id, rule)
+         SELECT id, $10::text FROM recorded WHERE $10::text IS NOT NULL
+         ON CONFLICT (audit_event_id) DO NOTHING`,
         [
           event.eventId ?? randomUUID(), process.env.OIDC_ISSUER?.trim() || null, event.actorId,
-          event.itemType, itemId, event.action, event.outcome, event.status, event.revision ?? null,
+          event.itemType, itemId, event.action, event.outcome, event.status, event.revision ?? null, alertRule,
         ],
       );
     } catch {
@@ -106,7 +119,8 @@ export class AuditService {
     const result = await this.database.query<AuditEventRow | { id: null }>(
       `SELECT event.id, event.actor_id AS "actorId", event.actor_name AS "actorName",
               event.item_type AS "itemType", event.item_id AS "itemId", event.action,
-              event.outcome, event.status, event.revision, event.occurred_at AS "occurredAt"
+              event.outcome, event.status, event.revision, event.occurred_at AS "occurredAt",
+              alert.rule AS "alertRule", alert.status AS "alertStatus"
        FROM audit_reviewers AS reviewer
        JOIN employees AS employee ON employee.id = reviewer.employee_id AND employee.active
        LEFT JOIN LATERAL (
@@ -116,6 +130,7 @@ export class AuditService {
          ORDER BY occurred_at DESC, id DESC
          LIMIT $2
        ) AS event ON true
+       LEFT JOIN security_alerts AS alert ON alert.audit_event_id = event.id
        WHERE reviewer.employee_id = $1
        ORDER BY event.occurred_at DESC, event.id DESC`,
       [reviewerId, limit, itemId],
