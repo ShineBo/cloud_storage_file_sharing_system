@@ -1,0 +1,77 @@
+x-recovery: &recovery
+  build:
+    context: .
+    target: recovery
+  image: se-final-cloud-storage-recovery:local
+  pull_policy: never
+  environment:
+    PGHOST: db
+    PGDATABASE: cloud_storage
+    PGUSER: cloud_storage
+    PGPASSWORD: ${POSTGRES_PASSWORD:?Run npm run local:configure}
+    OIDC_ISSUER: ${CLASS_IDENTITY_ORIGIN:-http://127.0.0.1:18080}/realms/se-final-class
+    FILE_STORAGE_PATH: /var/lib/cloud-storage/files
+    RECOVERY_ROOT: /var/lib/cloud-storage/backups
+    RECOVERY_KEY_FILE: /run/secrets/recovery-key
+    RECOVERY_INTERVAL_HOURS: ${RECOVERY_INTERVAL_HOURS:-12}
+  depends_on:
+    db:
+      condition: service_healthy
+
+x-backup-volumes: &backup-volumes
+  - type: volume
+    source: file_data
+    target: /var/lib/cloud-storage/files
+    read_only: true
+  - type: bind
+    source: ${RECOVERY_BACKUP_DIR:?Set an absolute protected backup directory}
+    target: /var/lib/cloud-storage/backups
+    bind:
+      create_host_path: false
+  - &recovery-key
+    type: bind
+    source: ${RECOVERY_KEY_PATH:?Set the absolute path to the recovery key file}
+    target: /run/secrets/recovery-key
+    read_only: true
+    bind:
+      create_host_path: false
+
+services:
+  backup:
+    <<: *recovery
+    profiles: [recovery]
+    command: [backup, --actor, '${RECOVERY_ACTOR:-it-admin}']
+    volumes: *backup-volumes
+
+  backup-schedule:
+    <<: *recovery
+    profiles: [recovery-schedule]
+    command: [schedule, --actor, '${RECOVERY_ACTOR:-it-admin}']
+    volumes: *backup-volumes
+    restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: '3'
+    healthcheck:
+      test: [CMD, node, /app/scripts/recovery.mjs, status]
+      interval: 5m
+      timeout: 30s
+      retries: 2
+
+  restore:
+    <<: *recovery
+    profiles: [recovery]
+    command: [status]
+    volumes:
+      - type: volume
+        source: file_data
+        target: /var/lib/cloud-storage/files
+      - type: bind
+        source: ${RECOVERY_BACKUP_DIR:?Set an absolute protected backup directory}
+        target: /var/lib/cloud-storage/backups
+        read_only: true
+        bind:
+          create_host_path: false
+      - *recovery-key

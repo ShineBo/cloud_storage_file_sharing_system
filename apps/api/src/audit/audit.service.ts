@@ -4,7 +4,7 @@ import { DatabaseService } from "../database.service";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
-type AuditItemType = "file" | "folder" | "share" | "policy" | "employee";
+type AuditItemType = "file" | "folder" | "share" | "policy" | "employee" | "recovery";
 type AuditOutcome = "success" | "denied" | "failed";
 type Risk = "denied-shared-access" | "inactive-share-access";
 export type AuditAction =
@@ -22,7 +22,10 @@ export type AuditAction =
   | "policy.update"
   | "account.update"
   | "item.delete"
-  | "item.restore";
+  | "item.restore"
+  | "recovery.backup"
+  | "recovery.restore"
+  | "recovery.resume";
 
 export type AuditAttempt = {
   eventId?: string;

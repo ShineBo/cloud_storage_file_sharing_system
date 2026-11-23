@@ -6,6 +6,7 @@ import {
   type NestFastifyApplication,
 } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
+import { DatabaseService } from "./database.service";
 
 async function bootstrap() {
   const host = process.env.API_HOST ?? "127.0.0.1";
@@ -19,6 +20,12 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({ multipart: false, requestTimeout: 3_600_000 }),
   );
+  try {
+    await app.get(DatabaseService).assertServingState();
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
   await app.register(multipart);
   app.setGlobalPrefix("api");
   app.enableShutdownHooks();

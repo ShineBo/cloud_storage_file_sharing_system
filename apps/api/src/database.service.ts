@@ -66,10 +66,16 @@ export class DatabaseService implements OnApplicationShutdown {
     }
 
     try {
-      await this.pool.query("SELECT 1");
-      return true;
+      const result = await this.pool.query("SELECT 1 FROM recovery_state WHERE singleton AND NOT blocked");
+      return result.rowCount === 1;
     } catch {
       return false;
+    }
+  }
+
+  async assertServingState() {
+    if (this.pool && !(await this.isReady())) {
+      throw new Error("The database is unavailable or awaiting recovery review.");
     }
   }
 
