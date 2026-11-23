@@ -836,3 +836,129 @@ h2 {
 .shared-revision-notice {
   margin-bottom: 12px;
 }
+
+.workspace-heading-with-nav,
+.workspace-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workspace-nav .button[aria-disabled="true"] {
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: default;
+}
+
+.management-page .workspace-heading p {
+  max-width: 65ch;
+}
+
+.management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 18px;
+}
+
+.management-panel {
+  min-width: 0;
+  padding: clamp(14px, 3vw, 22px);
+}
+
+.management-heading {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.management-panel > .notice,
+.management-panel > .notice + .button,
+.management-notice {
+  margin-bottom: 12px;
+}
+
+.policy-form,
+.policy-control {
+  display: grid;
+  gap: 6px;
+}
+
+.policy-form {
+  gap: 17px;
+  margin-top: 12px;
+}
+
+.policy-types {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.policy-types legend,
+.policy-control label {
+  padding: 0;
+  font-size: .875rem;
+  font-weight: 650;
+}
+
+.policy-type-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+}
+
+.policy-type-list label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 6px;
+  font-size: .875rem;
+}
+
+.policy-type-list input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.policy-control input {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #cbd7cd;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.management-list {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.management-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.management-list > li:last-child {
+  padding-bottom: 0;
+}
+
+@media (max-width: 760px) {
+  .management-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

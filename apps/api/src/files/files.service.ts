@@ -21,11 +21,11 @@ import { pipeline } from "node:stream/promises";
 import type { PoolClient } from "pg";
 import { AuditService, type AuditAttempt } from "../audit/audit.service";
 import { DatabaseService } from "../database.service";
+import { PolicyService } from "../policies/policy.service";
 import { expectedFileType, verifyFileType } from "./file-media";
 import { officePreview } from "./office-preview";
 
 const DEFAULT_MAX_FILE_BYTES = 2_000_000_000;
-const DEFAULT_QUOTA_BYTES = 20_000_000_000;
 export const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const FILE_COLUMNS = `id, original_name, folder_id, size_bytes, sha256, mime_type, created_at,
@@ -57,7 +57,7 @@ export type TransferContext = {
 
 type UploadContext = TransferContext & { folderId: string | null };
 type FileChanges = { name?: string; folderId?: string | null };
-type Reservation = { bytes: number; expiredIds: string[] };
+type Reservation = { bytes: number; expiredIds: string[]; allowedMimeTypes: string[] };
 type StagedFile = { name: string; size: number; sha256: string; mimeType: string };
 type Queryable = Pick<DatabaseService, "query">;
 type UploadValidation<T> = (client: PoolClient) => Promise<T>;
@@ -66,11 +66,11 @@ type UploadValidation<T> = (client: PoolClient) => Promise<T>;
 export class FilesService {
   private readonly logger = new Logger(FilesService.name);
   private readonly maxFileBytes = readLimit("FILE_MAX_BYTES", DEFAULT_MAX_FILE_BYTES);
-  private readonly quotaBytes = readLimit("FILE_QUOTA_BYTES", DEFAULT_QUOTA_BYTES);
 
   constructor(
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
+    private readonly policies: PolicyService,
   ) {}
 
   async list(ownerId: string, folderId: string | null) {
@@ -84,8 +84,9 @@ export class FilesService {
   }
 
   async policy(ownerId: string) {
-    const usage = await this.readUsage(this.database, ownerId);
-    return { maxFileBytes: this.maxFileBytes, quotaBytes: this.quotaBytes, ...usage };
+    const { quotaBytes, allowedMimeTypes } = await this.policies.read();
+    const usage = await this.readUsage(this.database, ownerId, quotaBytes);
+    return { maxFileBytes: this.maxFileBytes, quotaBytes, allowedMimeTypes, ...usage };
   }
 
   async upload(ownerId: string, context: UploadContext, auditEntry?: AuditAttempt) {
@@ -190,7 +191,7 @@ export class FilesService {
           if (part.type === "file") part.file.resume();
           throw new BadRequestException("Send a single file in the file field.");
         }
-        upload = await this.stage(part, stagedPath, reservation.bytes, declaredSize, signal);
+        upload = await this.stage(part, stagedPath, reservation, declaredSize, signal);
       }
       signal.throwIfAborted();
       if (!upload) {
@@ -207,6 +208,10 @@ export class FilesService {
           [key, ownerId],
         );
         if (!active.rowCount) throw uploadTimedOut();
+        const policy = await this.policies.read(client, true);
+        requireApprovedType(policy.allowedMimeTypes, completed.mimeType);
+        const { usedBytes } = await this.readUsage(client, ownerId, policy.quotaBytes);
+        if (usedBytes + completed.size > policy.quotaBytes) throw quotaExceeded();
         signal.throwIfAborted();
         await rename(stagedPath, blobPath);
         publishedBlob = true;
@@ -289,7 +294,10 @@ export class FilesService {
   }
 
   private async lockFile(client: PoolClient, ownerId: string, id: string) {
-    const result = await client.query("SELECT id FROM files WHERE owner_id = $1 AND id = $2 FOR UPDATE", [ownerId, id]);
+    const result = await client.query(
+      "SELECT id FROM files WHERE owner_id = $1 AND id = $2 AND trash_id IS NULL FOR UPDATE",
+      [ownerId, id],
+    );
     if (!result.rowCount) throw fileNotFound();
   }
 
@@ -351,7 +359,8 @@ export class FilesService {
            AND expires_at <= clock_timestamp() RETURNING id`,
         [ownerId],
       );
-      const { availableBytes } = await this.readUsage(client, ownerId);
+      const policy = await this.policies.read(client, true);
+      const { availableBytes } = await this.readUsage(client, ownerId, policy.quotaBytes);
       const bytes = context.declaredSize ?? Math.min(this.maxFileBytes, availableBytes);
       if (bytes <= 0 || bytes > availableBytes) {
         throw quotaExceeded();
@@ -361,11 +370,11 @@ export class FilesService {
          VALUES ($1, $2, $3, $4)`,
         [key, ownerId, bytes, context.expiresAt],
       );
-      return { bytes, expiredIds: expired.rows.map(({ id }) => id) };
+      return { bytes, expiredIds: expired.rows.map(({ id }) => id), allowedMimeTypes: policy.allowedMimeTypes };
     });
   }
 
-  private async readUsage(database: Queryable, ownerId: string) {
+  private async readUsage(database: Queryable, ownerId: string, quotaBytes: number) {
     const result = await database.query<{ used: string; reserved: string }>(
       `SELECT
          (SELECT COALESCE(SUM(revision.size_bytes), 0)::text FROM file_revisions AS revision
@@ -376,14 +385,14 @@ export class FilesService {
     );
     const { used, reserved } = result.rows[0];
     const usedBytes = Number(used);
-    const availableBytes = Math.max(0, this.quotaBytes - usedBytes - Number(reserved));
+    const availableBytes = Math.max(0, quotaBytes - usedBytes - Number(reserved));
     return { usedBytes, availableBytes };
   }
 
   private async stage(
     part: MultipartFile,
     path: string,
-    limit: number,
+    { bytes: limit, allowedMimeTypes }: Reservation,
     declaredSize: number | undefined,
     signal: AbortSignal,
   ): Promise<StagedFile> {
@@ -392,6 +401,7 @@ export class FilesService {
     try {
       name = parseFileName(part.filename);
       expected = expectedFileType(name);
+      requireApprovedType(allowedMimeTypes, expected.mimeType);
     } catch (error) {
       part.file.resume();
       throw error;
@@ -499,6 +509,12 @@ function fileNotFound() {
   return new NotFoundException("File not found.");
 }
 
+function requireApprovedType(allowed: string[], mimeType: string) {
+  if (!allowed.includes(mimeType)) {
+    throw new UnsupportedMediaTypeException("Your organization’s file type policy does not allow this upload.");
+  }
+}
+
 function quotaExceeded() {
   return new ConflictException("There is not enough available storage for this upload.");
 }
@@ -506,7 +522,7 @@ function quotaExceeded() {
 async function requireOwnedFolder(database: Queryable, ownerId: string, folderId: string | null) {
   if (folderId === null) return;
   const result = await database.query(
-    "SELECT id FROM folders WHERE owner_id = $1 AND id = $2",
+    "SELECT id FROM folders WHERE owner_id = $1 AND id = $2 AND trash_id IS NULL",
     [ownerId, folderId],
   );
   if (!result.rowCount) throw new NotFoundException("Folder not found.");

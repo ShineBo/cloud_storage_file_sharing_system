@@ -31,7 +31,7 @@ export class FoldersService {
   async list(ownerId: string) {
     const result = await this.database.query<FolderRow>(
       `SELECT id, name, parent_id, created_at
-       FROM folders WHERE owner_id = $1 ORDER BY name, id`,
+       FROM folders WHERE owner_id = $1 AND trash_id IS NULL ORDER BY name, id`,
       [ownerId],
     );
     return result.rows.map(toFolder);
@@ -71,7 +71,7 @@ export class FoldersService {
 
       const result = await client.query<FolderRow>(
         `UPDATE folders SET name = $3, parent_id = $4
-         WHERE owner_id = $1 AND id = $2
+         WHERE owner_id = $1 AND id = $2 AND trash_id IS NULL
          RETURNING id, name, parent_id, created_at`,
         [
           ownerId,
@@ -127,7 +127,7 @@ export class FoldersService {
   private async findOwnedFolder(client: PoolClient, ownerId: string, id: string) {
     const result = await client.query<FolderRow>(
       `SELECT id, name, parent_id, created_at
-       FROM folders WHERE owner_id = $1 AND id = $2`,
+       FROM folders WHERE owner_id = $1 AND id = $2 AND trash_id IS NULL`,
       [ownerId, id],
     );
     const folder = result.rows[0];
@@ -143,12 +143,12 @@ export class FoldersService {
   ) {
     const result = await client.query(
       `WITH RECURSIVE ancestors AS (
-         SELECT id, parent_id FROM folders WHERE owner_id = $1 AND id = $2
+         SELECT id, parent_id FROM folders WHERE owner_id = $1 AND id = $2 AND trash_id IS NULL
          UNION
          SELECT folder.id, folder.parent_id
          FROM folders AS folder
          JOIN ancestors AS child ON folder.id = child.parent_id
-         WHERE folder.owner_id = $1
+         WHERE folder.owner_id = $1 AND folder.trash_id IS NULL
        )
        SELECT id FROM ancestors WHERE id = $3`,
       [ownerId, parentId, folderId],

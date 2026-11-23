@@ -12,12 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      COMPOSE_PROJECT_NAME: cloud-step4-ci
+      COMPOSE_PROJECT_NAME: cloud-step7-ci
       FILE_MAX_BYTES: "8192"
       FILE_QUOTA_BYTES: "32768"
       STEP3_VERIFY_LIMITS: "1"
       STEP4_DB_CHECK: "1"
       STEP6_MAIL_CHECK: "1"
+      STEP7_DB_CHECK: "1"
       MAILPIT_ENABLE_CHAOS: "true"
     steps:
       - uses: actions/checkout@v6

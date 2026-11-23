@@ -94,10 +94,14 @@ export class AuthService {
     const previous = readAuthCookie(request, "se_session", secure);
     const session = await this.database.query<{ token_hash: string }>(
       `
-        WITH created AS (
+        WITH eligible AS (
+          SELECT issuer, subject FROM employees
+          WHERE issuer = $2 AND subject = $3 AND active
+          FOR SHARE
+        ), created AS (
           INSERT INTO auth_sessions (token_hash, issuer, subject, expires_at)
           SELECT $1, issuer, subject, now() + $4::integer * interval '1 second'
-          FROM employees WHERE issuer = $2 AND subject = $3 AND active
+          FROM eligible
           RETURNING token_hash
         ), expired AS (
           DELETE FROM auth_sessions

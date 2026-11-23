@@ -13,10 +13,11 @@ import type { PoolClient } from "pg";
 import { AuditService, type AuditAttempt } from "../audit/audit.service";
 import { DatabaseService } from "../database.service";
 import type { StoredBlob } from "../files/files.service";
+import { PolicyService } from "../policies/policy.service";
+import { LIVE_SHARE_TARGET } from "./live-share-target";
 import { NotificationService, type ShareDelivery } from "../notifications/notification.service";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-const DEFAULT_EXPIRY_DAYS = 30;
 
 // Each share is one link, addressed only to the stored employee or group.
 type ItemType = "file" | "folder";
@@ -65,6 +66,7 @@ export class SharesService {
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationService,
+    private readonly policies: PolicyService,
   ) {}
 
   async recipients(ownerId: string) {
@@ -133,15 +135,16 @@ export class SharesService {
         throw new BadRequestException("Choose an active internal employee or an approved group.");
       }
 
+      const { linkExpiryDays } = await this.policies.read(client, true);
       const saved = (await client.query<ShareRow>(
         `INSERT INTO shares (
            id, owner_id, issuer, request_id, file_id, folder_id, recipient_employee_id, recipient_group_id,
            permission, allow_download, expires_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now() + $11::int * interval '1 day')
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, clock_timestamp() + $11::int * interval '1 day')
          RETURNING *`,
         [
           randomUUID(), ownerId, owner.issuer, input.requestId, fileId, folderId, employeeId,
-          groupId, input.permission, input.allowDownload, DEFAULT_EXPIRY_DAYS,
+          groupId, input.permission, input.allowDownload, linkExpiryDays,
         ],
       )).rows[0];
       await this.notifications.queueShare(client, saved.id);
@@ -198,7 +201,7 @@ export class SharesService {
         `SELECT share.revoked_at, share.expires_at <= clock_timestamp() AS expired
          FROM shares AS share
          JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
-         WHERE share.id = $1 AND share.owner_id = $2
+         WHERE share.id = $1 AND share.owner_id = $2 AND ${LIVE_SHARE_TARGET}
          FOR NO KEY UPDATE OF share`,
         [id, ownerId],
       )).rows[0];
@@ -254,7 +257,7 @@ export class SharesService {
       const path = await this.requireFolderPath(client, share.owner_id, rootId, currentId);
       const current = path[path.length - 1];
       const folders = await client.query<FolderRow>(
-        "SELECT id, name, parent_id FROM folders WHERE owner_id = $1 AND parent_id = $2 ORDER BY name, id",
+        "SELECT id, name, parent_id FROM folders WHERE owner_id = $1 AND parent_id = $2 AND trash_id IS NULL ORDER BY name, id",
         [share.owner_id, currentId],
       );
       const files = await client.query<FileDetails>(
@@ -328,7 +331,7 @@ export class SharesService {
     const table = itemType === "file" ? "files" : "folders";
     const found = await client.query(
       `SELECT item.id FROM ${table} AS item JOIN employees AS sender ON sender.id = item.owner_id
-       WHERE item.owner_id = $1 AND item.id = $2 AND sender.active`,
+       WHERE item.owner_id = $1 AND item.id = $2 AND item.trash_id IS NULL AND sender.active`,
       [ownerId, itemId],
     );
     if (!found.rowCount) throw new NotFoundException("The item is unavailable in your workspace.");
@@ -342,7 +345,7 @@ export class SharesService {
        JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
        JOIN employees AS recipient
          ON recipient.id = $2 AND recipient.issuer = share.issuer AND recipient.active
-       WHERE share.id = $1 AND (
+       WHERE share.id = $1 AND ${LIVE_SHARE_TARGET} AND (
          share.recipient_employee_id = recipient.id OR EXISTS (
            SELECT 1 FROM internal_group_members AS member
            JOIN internal_groups AS team ON team.id = member.group_id AND team.approved
@@ -370,11 +373,11 @@ export class SharesService {
   private async requireFolderPath(client: PoolClient, ownerId: string, rootId: string, leafId: string) {
     const result = await client.query<FolderRow>(
       `WITH RECURSIVE ancestors AS (
-         SELECT id, name, parent_id FROM folders WHERE owner_id = $1 AND id = $2
+         SELECT id, name, parent_id FROM folders WHERE owner_id = $1 AND id = $2 AND trash_id IS NULL
          UNION
          SELECT folder.id, folder.name, folder.parent_id
          FROM folders AS folder JOIN ancestors AS child ON child.parent_id = folder.id
-         WHERE folder.owner_id = $1 AND child.id <> $3
+         WHERE folder.owner_id = $1 AND folder.trash_id IS NULL AND child.id <> $3
        ) SELECT id, name, parent_id FROM ancestors`,
       [ownerId, leafId, rootId],
     );

@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { fileExtension, formatSize, uploadFileRequest } from "./file-transfer";
+import { fileExtension, formatSize, responseMessage, uploadFileRequest, uploadFormats } from "./file-transfer";
 import { RevisionDetails, RevisionDialog, staleRevisionNotice, type Revision } from "./revision-dialog";
 import { ShareDialog } from "./share-dialog";
 
@@ -36,6 +36,7 @@ type StoragePolicy = {
   maxFileBytes: number;
   quotaBytes: number;
   availableBytes: number;
+  allowedMimeTypes: string[];
 };
 
 type WorkspaceData = {
@@ -46,17 +47,17 @@ type WorkspaceData = {
 
 type Feedback = { kind: "error" | "success"; message: string };
 type Item = { type: "folder"; data: Folder } | { type: "file"; data: StoredFile };
-type ItemAction = { type: "create" } | { type: "rename" | "move"; item: Item };
+type ItemAction = { type: "create" } | { type: "rename" | "move" | "trash"; item: Item };
 
-const extensions = [".png", ".jpg", ".jpeg", ".pdf", ".docx", ".xlsx", ".pptx"];
-const fileTypes = "PDF, DOCX, XLSX, PPTX, JPEG, and PNG";
+const fileTypeList = new Intl.ListFormat(undefined, { type: "conjunction" });
 const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const folderSort = new Intl.Collator(undefined, { numeric: true });
 
 function validateFile(file: File, policy: StoragePolicy) {
   if (file.size === 0) return "This file is empty. Choose another file.";
-  if (!extensions.includes(fileExtension(file.name))) {
-    return `Choose an approved file type: ${fileTypes}.`;
+  const formats = uploadFormats(policy.allowedMimeTypes);
+  if (!formats.some(({ extensions }) => extensions.includes(fileExtension(file.name)))) {
+    return `Choose an approved file type. This workspace allows ${fileTypeList.format(formats.map(({ name }) => name))}.`;
   }
   if (file.size > policy.maxFileBytes) {
     return `This file exceeds the ${formatSize(policy.maxFileBytes)} limit. Choose a smaller file.`;
@@ -108,6 +109,10 @@ function uploadErrorMessage(status: number, policy: StoragePolicy) {
 }
 
 function itemErrorMessage(status: number, action: ItemAction) {
+  if (action.type === "trash") {
+    return status === 404 ? "This item is unavailable. Reload your files and try again."
+      : "The move to Trash could not be confirmed. Check your files and try again.";
+  }
   switch (status) {
     case 400:
       if (action.type === "move") return "Choose a different destination folder.";
@@ -185,6 +190,17 @@ export function Workspace({
   const [revisionFile, setRevisionFile] = useState<StoredFile>();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutFailed, setSignOutFailed] = useState(false);
+  const [canAdminister, setCanAdminister] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/admin/policy", { cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!controller.signal.aborted) setCanAdminister(response.ok);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -241,6 +257,7 @@ export function Workspace({
     : [];
   const canEdit = loadStatus === "ready" && !uploading && !signingOut;
   const policy = workspace?.policy;
+  const formats = uploadFormats(policy?.allowedMimeTypes);
 
   function reloadWorkspace() {
     setLoadStatus("loading");
@@ -297,14 +314,15 @@ export function Workspace({
     const query = new URLSearchParams({ size: String(selectedFile.size) });
     if (folderId) query.set("folderId", folderId);
     try {
-      const { status } = await uploadFileRequest(`/api/files?${query}`, selectedFile, setUploadPercent);
+      const { status, body } = await uploadFileRequest(`/api/files?${query}`, selectedFile, setUploadPercent);
       if (status === 401) {
         onSessionExpired();
         return;
       }
       if (status < 200 || status >= 300) {
-        setUploadFeedback({ kind: "error", message: uploadErrorMessage(status, policy) });
-        if (status === 404 || status === 409) reloadWorkspace();
+        const fallback = uploadErrorMessage(status, policy);
+        setUploadFeedback({ kind: "error", message: status === 415 ? responseMessage(body, fallback) : fallback });
+        if (status === 404 || status === 409 || status === 413 || status === 415) reloadWorkspace();
         return;
       }
 
@@ -324,6 +342,9 @@ export function Workspace({
     let body: Record<string, string | null>;
     if (currentAction.type === "create") {
       body = { name: value, parentId: folderId };
+    } else if (currentAction.type === "trash") {
+      endpoint = "/api/trash";
+      body = { itemType: currentAction.item.type, itemId: currentAction.item.data.id };
     } else {
       const { item } = currentAction;
       endpoint = `/api/${item.type === "folder" ? "folders" : "files"}/${encodeURIComponent(item.data.id)}`;
@@ -336,7 +357,7 @@ export function Workspace({
 
     try {
       const response = await fetch(endpoint, {
-        method: currentAction.type === "create" ? "POST" : "PATCH",
+        method: currentAction.type === "create" || currentAction.type === "trash" ? "POST" : "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -349,6 +370,7 @@ export function Workspace({
 
       const message = currentAction.type === "create" ? `Folder ${value} created.`
         : currentAction.type === "rename" ? `Renamed to ${value}.`
+        : currentAction.type === "trash" ? `${currentAction.item.data.name} moved to Trash.`
         : `${currentAction.item.data.name} moved to ${workspace?.folders.get(value)?.name ?? "My files"}.`;
       setItemFeedback({ kind: "success", message });
     } catch {
@@ -373,9 +395,17 @@ export function Workspace({
     <>
       <Header user={user} onSignOut={signOut} signingOut={signingOut} uploading={uploading} />
       <main className="workspace">
-        <div className="workspace-heading">
-          <h1>My files</h1>
-          <p>Organize and share files from your private workspace.</p>
+        <div className="workspace-heading workspace-heading-with-nav">
+          <div>
+            <h1>My files</h1>
+            <p>Organize and share files from your private workspace.</p>
+          </div>
+          <nav className="workspace-nav" aria-label="Workspace pages">
+            <a className="button button-secondary" href="/trash" aria-disabled={uploading || signingOut}
+              onClick={(event) => { if (uploading || signingOut) event.preventDefault(); }}>Trash</a>
+            {canAdminister && <a className="button button-secondary" href="/admin" aria-disabled={uploading || signingOut}
+              onClick={(event) => { if (uploading || signingOut) event.preventDefault(); }}>Administration</a>}
+          </nav>
         </div>
         {breadcrumbs.length > 0 && (
           <nav className="breadcrumbs" aria-label="Folder path">
@@ -406,7 +436,7 @@ export function Workspace({
             <h2 id="upload-title">Upload a file</h2>
             {currentFolder && <p className="upload-destination">To {currentFolder.name}</p>}
             <p id="file-limits" className="panel-description">
-              {fileTypes}.{policy && ` Up to ${formatSize(policy.maxFileBytes)} per file.`}
+              {fileTypeList.format(formats.map(({ name }) => name))}.{policy && ` Up to ${formatSize(policy.maxFileBytes)} per file.`}
             </p>
             {policy && (
               <p className="storage-summary">
@@ -420,7 +450,7 @@ export function Workspace({
                   className="visually-hidden"
                   type="file"
                   name="file"
-                  accept={extensions.join(",")}
+                  accept={formats.flatMap(({ extensions }) => extensions).join(",")}
                   aria-describedby="file-limits"
                   disabled={!canEdit}
                   onChange={chooseFile}
@@ -572,6 +602,11 @@ function ItemActions({
         aria-label={`Share ${item.data.name}`} disabled={disabled} onClick={() => onShare(item)}>
         Share
       </button>
+      <button className="button button-secondary" type="button"
+        aria-label={`Move ${item.data.name} to trash`} disabled={disabled}
+        onClick={() => onAction({ type: "trash", item })}>
+        Move to trash
+      </button>
       {item.type === "file" && (
         <>
           <button className="button button-secondary" type="button"
@@ -626,15 +661,16 @@ function ItemDialog({
     .sort((left, right) => folderSort.compare(left.label, right.label))
     : [];
   const hasDestination = currentParent !== null || destinations.some((folder) => folder.id !== currentParent);
-  const title = action.type === "create" ? "New folder" : action.type === "rename" ? "Rename item" : "Move item";
-  const submitLabel = action.type === "create" ? "Create folder" : action.type === "rename" ? "Save name" : "Move item";
+  const title = action.type === "create" ? "New folder" : action.type === "rename" ? "Rename item"
+    : action.type === "trash" ? "Move to trash" : "Move item";
+  const submitLabel = action.type === "create" ? "Create folder" : action.type === "rename" ? "Save name" : title;
   const renamesFile = action.type === "rename" && action.item.type === "file";
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || (action.type === "move" && destination === undefined)) return;
     const nextValue = action.type === "move" ? destination ?? "" : value.trim();
-    if (action.type !== "move") {
+    if (action.type === "create" || action.type === "rename") {
       const problem = validateName(nextValue);
       if (problem) {
         setError(problem);
@@ -671,7 +707,12 @@ function ItemDialog({
       <form onSubmit={save}>
         <h2 id="item-dialog-title">{title}</h2>
         {action.type !== "create" && <p className="dialog-item-name">{action.item.data.name}</p>}
-        {moving ? (
+        {action.type === "trash" ? (
+          <p className="panel-description">
+            {action.item.type === "folder" ? "This moves the folder and its contents to Trash." : "This moves the file to Trash."}
+            {" "}Shared access pauses while the item is there. You can restore it before its recovery deadline.
+          </p>
+        ) : moving ? (
           <>
             <label htmlFor="destination">Destination folder</label>
             <select

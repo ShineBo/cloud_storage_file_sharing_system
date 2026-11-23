@@ -1,3 +1,21 @@
+export const fileFormats = [
+  { name: "PDF", label: "PDF", mimeType: "application/pdf", extensions: [".pdf"] },
+  { name: "DOCX", label: "Word (DOCX)", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", extensions: [".docx"] },
+  { name: "XLSX", label: "Excel (XLSX)", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", extensions: [".xlsx"] },
+  { name: "PPTX", label: "PowerPoint (PPTX)", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", extensions: [".pptx"] },
+  { name: "JPEG", label: "JPEG", mimeType: "image/jpeg", extensions: [".jpg", ".jpeg"] },
+  { name: "PNG", label: "PNG", mimeType: "image/png", extensions: [".png"] },
+];
+
+export function uploadFormats(allowedMimeTypes?: string[]) {
+  return fileFormats.filter(({ mimeType }) => allowedMimeTypes?.includes(mimeType) ?? true);
+}
+
+export function responseMessage(body: unknown, fallback: string) {
+  return body && typeof body === "object" && "message" in body && typeof body.message === "string"
+    ? body.message : fallback;
+}
+
 const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
 export function formatSize(bytes: number) {

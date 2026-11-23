@@ -44,6 +44,7 @@ const approvedTypes = new Map<string, FileType | OfficeType>([
     documentType: OFFICE_MIME + "presentationml.presentation.main+xml",
   }],
 ]);
+export const supportedMimeTypes = [...new Set([...approvedTypes.values()].map(({ mimeType }) => mimeType))];
 const executableEntry = /(?:^|\/)vbaProject\.bin$|\.(?:exe|dll|msi|com|scr|bat|cmd|ps1|sh|vbs)$/i;
 
 export function expectedFileType(name: string) {

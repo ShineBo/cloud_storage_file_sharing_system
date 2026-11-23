@@ -375,8 +375,8 @@ function uuidLiteral(value) {
 
 async function fixtureSql(sql) {
   const project = process.env.COMPOSE_PROJECT_NAME;
-  if (!/^cloud-step[4-6]-[a-z\d-]+$/.test(project ?? "")) {
-    throw new Error("STEP4_DB_CHECK requires a disposable COMPOSE_PROJECT_NAME starting with cloud-step4-, cloud-step5-, or cloud-step6-.");
+  if (!/^cloud-step\d+-[a-z\d-]+$/.test(project ?? "")) {
+    throw new Error("STEP4_DB_CHECK requires a disposable COMPOSE_PROJECT_NAME starting with cloud-step<step number>-.");
   }
   const { stdout } = await exec("docker", [
     "compose", "-p", project, ...composeFiles.flatMap((name) => ["-f", name]),

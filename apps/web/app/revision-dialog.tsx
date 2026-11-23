@@ -1,11 +1,11 @@
 "use client";
 
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
-import { fileExtension, formatSize, uploadFileRequest } from "./file-transfer";
+import { fileExtension, formatSize, responseMessage, uploadFileRequest, uploadFormats } from "./file-transfer";
 
 export type Revision = { revision: number; authorName: string; revisedAt: string };
 type RevisableFile = Revision & { name: string };
-type UploadLimits = { maxFileBytes: number; availableBytes: number };
+type UploadLimits = { maxFileBytes: number; availableBytes: number; allowedMimeTypes: string[] };
 
 const revisionTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -59,6 +59,9 @@ function checkReplacement(file: File, extensions: string[], limits?: UploadLimit
   }
   if (!extensions.includes(fileExtension(file.name))) return "Choose a replacement of the same file type.";
   if (!limits) return;
+  if (!uploadFormats(limits.allowedMimeTypes).some(({ extensions }) => extensions.includes(fileExtension(file.name)))) {
+    return "This file type is currently blocked for new revisions.";
+  }
   if (file.size > limits.maxFileBytes) return rejectionMessage(413, limits);
   if (file.size > limits.availableBytes) return rejectionMessage(409, limits);
 }
@@ -126,7 +129,8 @@ export function RevisionDialog({
           return;
         }
       }
-      setError(rejectionMessage(status, limits));
+      const fallback = rejectionMessage(status, limits);
+      setError(status === 415 ? responseMessage(body, fallback) : fallback);
     } catch {
       setError(rejectionMessage(0, limits));
     } finally {

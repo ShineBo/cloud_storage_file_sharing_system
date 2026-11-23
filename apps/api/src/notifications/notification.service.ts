@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { OidcService } from "../auth/oidc.service";
 import { DatabaseService } from "../database.service";
+import { LIVE_SHARE_TARGET } from "../shares/live-share-target";
 import { readMailbox, SmtpService } from "./smtp.service";
 
 export type ShareDelivery = {
@@ -41,6 +42,7 @@ const ELIGIBLE_RECIPIENTS = `
   JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
   JOIN employees AS recipient ON recipient.issuer = share.issuer AND recipient.active
   WHERE share.id = $1 AND share.revoked_at IS NULL AND share.expires_at > clock_timestamp()
+    AND ${LIVE_SHARE_TARGET}
     AND (share.recipient_employee_id = recipient.id OR EXISTS (
       SELECT 1 FROM internal_group_members AS member
       JOIN internal_groups AS team ON team.id = member.group_id AND team.approved

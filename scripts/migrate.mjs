@@ -13,14 +13,25 @@ async function seedClassDirectory(db) {
   for (const user of users) {
     if (user.username === "eve") continue;
 
+    const eligible = user.username !== "dana";
     await db.query(
-      `INSERT INTO employees (id, issuer, subject, username, display_name, active, notification_email)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO employees (id, issuer, subject, username, display_name, active, notification_email, directory_eligible)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $6)
        ON CONFLICT (issuer, subject) DO UPDATE
        SET notification_email = EXCLUDED.notification_email
        WHERE employees.notification_email IS NULL`,
       [randomUUID(), process.env.OIDC_ISSUER, user.id, user.username,
-        `${user.firstName} ${user.lastName}`, user.username !== "dana", user.email ?? null],
+        `${user.firstName} ${user.lastName}`, eligible, user.email ?? null],
+    );
+  }
+
+  const policyAdmin = users.find(({ username }) => username === "it-admin");
+  if (policyAdmin) {
+    await db.query(
+      `INSERT INTO policy_admins (employee_id)
+       SELECT id FROM employees WHERE issuer = $1 AND subject = $2
+       ON CONFLICT DO NOTHING`,
+      [process.env.OIDC_ISSUER, policyAdmin.id],
     );
   }
 

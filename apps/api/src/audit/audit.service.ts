@@ -4,7 +4,7 @@ import { DatabaseService } from "../database.service";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
-type AuditItemType = "file" | "folder" | "share";
+type AuditItemType = "file" | "folder" | "share" | "policy" | "employee";
 type AuditOutcome = "success" | "denied" | "failed";
 type Risk = "denied-shared-access" | "inactive-share-access";
 export type AuditAction =
@@ -18,7 +18,11 @@ export type AuditAction =
   | "view"
   | "download"
   | "edit.prepare"
-  | "edit";
+  | "edit"
+  | "policy.update"
+  | "account.update"
+  | "item.delete"
+  | "item.restore";
 
 export type AuditAttempt = {
   eventId?: string;
@@ -28,6 +32,7 @@ export type AuditAttempt = {
   itemId?: string | null;
   revision?: number | null;
   risk?: Risk;
+  detail?: Record<string, unknown>;
 };
 
 export type AuditEntry = AuditAttempt & {
@@ -48,6 +53,7 @@ type AuditEventRow = {
   occurredAt: Date;
   alertRule: Risk | null;
   alertStatus: string | null;
+  detail: Record<string, unknown> | null;
 };
 
 @Injectable()
@@ -66,9 +72,9 @@ export class AuditService {
       await db.query(
         `WITH recorded AS (
            INSERT INTO audit_events (
-             id, identity_issuer, actor_id, actor_name, item_type, item_id, action, outcome, status, revision
+             id, identity_issuer, actor_id, actor_name, item_type, item_id, action, outcome, status, revision, detail
            )
-           SELECT $1, COALESCE(actor.issuer, $2), $3, actor.display_name, $4, $5, $6, $7, $8, $9
+           SELECT $1, COALESCE(actor.issuer, $2), $3, actor.display_name, $4, $5, $6, $7, $8, $9, $11::jsonb
            FROM (VALUES (1)) AS source(value)
            LEFT JOIN employees AS actor ON actor.id = $3
            ON CONFLICT (id) DO NOTHING
@@ -80,6 +86,7 @@ export class AuditService {
         [
           event.eventId ?? randomUUID(), process.env.OIDC_ISSUER?.trim() || null, event.actorId,
           event.itemType, itemId, event.action, event.outcome, event.status, event.revision ?? null, alertRule,
+          event.detail ? JSON.stringify(event.detail) : null,
         ],
       );
     } catch {
@@ -120,11 +127,11 @@ export class AuditService {
       `SELECT event.id, event.actor_id AS "actorId", event.actor_name AS "actorName",
               event.item_type AS "itemType", event.item_id AS "itemId", event.action,
               event.outcome, event.status, event.revision, event.occurred_at AS "occurredAt",
-              alert.rule AS "alertRule", alert.status AS "alertStatus"
+              event.detail, alert.rule AS "alertRule", alert.status AS "alertStatus"
        FROM audit_reviewers AS reviewer
        JOIN employees AS employee ON employee.id = reviewer.employee_id AND employee.active
        LEFT JOIN LATERAL (
-         SELECT id, actor_id, actor_name, item_type, item_id, action, outcome, status, revision, occurred_at
+         SELECT id, actor_id, actor_name, item_type, item_id, action, outcome, status, revision, occurred_at, detail
          FROM audit_events
          WHERE identity_issuer = employee.issuer AND ($3::uuid IS NULL OR item_id = $3)
          ORDER BY occurred_at DESC, id DESC
