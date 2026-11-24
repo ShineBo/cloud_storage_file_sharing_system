@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatSize } from "../../file-transfer";
+import { localDateTime } from "../../local-date-time";
 import { RevisionDetails, RevisionDialog, staleRevisionNotice, type Revision } from "../../revision-dialog";
 import { Header } from "../../workspace";
 
@@ -23,8 +24,6 @@ type LoadState =
   | { status: "loading" }
   | { status: "ready"; data: ShareContents }
   | { status: "error"; code: number; message: string; loginFailed?: boolean };
-
-const expiryFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 async function accessError(response: Response, loginStatus?: string | null) {
   if (response.status === 401 || response.status === 404) {
@@ -52,6 +51,8 @@ async function accessError(response: Response, loginStatus?: string | null) {
 }
 
 export function SharedWorkspace({ id }: { id: string }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const focusAfterNavigation = useRef(false);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [folderId, setFolderId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
@@ -89,7 +90,15 @@ export function SharedWorkspace({ id }: { id: string }) {
     return () => controller.abort();
   }, [folderId, attempt, sharePath]);
 
+  useEffect(() => {
+    if (state.status !== "loading" && focusAfterNavigation.current) {
+      focusAfterNavigation.current = false;
+      if (document.activeElement === document.body) headingRef.current?.focus();
+    }
+  }, [state, selectedId]);
+
   function openFolder(nextFolder: string | null) {
+    focusAfterNavigation.current = nextFolder !== folderId || selectedId !== undefined;
     setSelectedId(undefined);
     setRevisionNotice(undefined);
     setShowPreview(false);
@@ -100,6 +109,7 @@ export function SharedWorkspace({ id }: { id: string }) {
   }
 
   function reload() {
+    focusAfterNavigation.current = true;
     setRevisionOpen(false);
     setShowPreview(false);
     setState({ status: "loading" });
@@ -114,7 +124,7 @@ export function SharedWorkspace({ id }: { id: string }) {
         <main className="entry">
           <section className="entry-card" aria-labelledby="shared-title">
             <div className="entry-icon" aria-hidden="true"><span className="folder-icon" /></div>
-            <h1 id="shared-title">{signedOut ? "Open shared item" : "Shared item"}</h1>
+            <h1 id="shared-title" ref={headingRef} tabIndex={-1}>{signedOut ? "Open shared item" : "Shared item"}</h1>
             {state.status === "loading" && <p className="entry-status" role="status">Opening link…</p>}
             {state.status === "error" && (
               <>
@@ -139,7 +149,7 @@ export function SharedWorkspace({ id }: { id: string }) {
   const { data } = state;
   const selected = data.entries.find((entry) => entry.type === "file" && entry.id === selectedId);
   const current = selected ?? data.item;
-  const expiry = expiryFormat.format(new Date(data.expiresAt));
+  const expiry = localDateTime.format(new Date(data.expiresAt));
 
   return (
     <>
@@ -147,7 +157,7 @@ export function SharedWorkspace({ id }: { id: string }) {
       <main className="workspace shared-workspace">
         <a className="shared-back" href="/">My files</a>
         <div className="workspace-heading shared-heading">
-          <h1>{current.name}</h1>
+          <h1 ref={headingRef} tabIndex={-1}>{current.name}</h1>
           <p>
             Shared by {data.ownerName}
             {" · "}
@@ -205,6 +215,7 @@ export function SharedWorkspace({ id }: { id: string }) {
                         onClick={() => {
                           if (entry.type === "folder") openFolder(entry.id);
                           else {
+                            focusAfterNavigation.current = true;
                             setSelectedId(entry.id);
                             setRevisionNotice(undefined);
                           }
@@ -229,7 +240,8 @@ export function SharedWorkspace({ id }: { id: string }) {
               </div>
               <div className="item-actions">
                 <button className="button button-primary" type="button"
-                  aria-expanded={showPreview} onClick={() => setShowPreview((previous) => !previous)}>
+                  aria-expanded={showPreview} aria-controls="shared-preview"
+                  onClick={() => setShowPreview((previous) => !previous)}>
                   {showPreview ? "Close preview" : "Preview file"}
                 </button>
                 {data.permission === "edit" && (
@@ -245,14 +257,16 @@ export function SharedWorkspace({ id }: { id: string }) {
                 )}
               </div>
             </div>
-            {showPreview && (
-              <FilePreview
-                key={`${current.id}:${current.revision}`}
-                file={current}
-                url={`${sharePath}/files/${encodeURIComponent(current.id)}/view`}
-                onReload={reload}
-              />
-            )}
+            <div id="shared-preview" hidden={!showPreview}>
+              {showPreview && (
+                <FilePreview
+                  key={`${current.id}:${current.revision}`}
+                  file={current}
+                  url={`${sharePath}/files/${encodeURIComponent(current.id)}/view`}
+                  onReload={reload}
+                />
+              )}
+            </div>
           </section>
         )}
       </main>
@@ -327,7 +341,8 @@ function FilePreview({ file, url, onReload }: { file: SharedFile; url: string; o
   }
 
   return (
-    <div className="shared-preview office-preview" aria-label={`Preview of ${file.name}`}>
+    <div className="shared-preview office-preview" role="region"
+      aria-label={`Preview of ${file.name}`} tabIndex={sections?.length ? 0 : undefined}>
       {sections === undefined ? <p className="file-meta" role="status">Loading preview…</p>
         : sections.length === 0 ? <p className="file-meta">This document has no text to preview.</p>
           : sections.map((section, index) => <p key={index}>{section}</p>)}

@@ -2,18 +2,17 @@
 
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { fileExtension, formatSize, responseMessage, uploadFileRequest, uploadFormats } from "./file-transfer";
+import { localDateTime } from "./local-date-time";
 
 export type Revision = { revision: number; authorName: string; revisedAt: string };
 type RevisableFile = Revision & { name: string };
 type UploadLimits = { maxFileBytes: number; availableBytes: number; allowedMimeTypes: string[] };
 
-const revisionTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
 export function RevisionDetails({ file }: { file: Revision }) {
   return (
     <span className="file-meta revision-details">
       Version {file.revision}{" · "}{file.authorName}{" · "}
-      <time dateTime={file.revisedAt}>{revisionTime.format(new Date(file.revisedAt))}</time>
+      <time dateTime={file.revisedAt}>{localDateTime.format(new Date(file.revisedAt))}</time>
     </span>
   );
 }
@@ -99,6 +98,11 @@ export function RevisionDialog({
     setSelected(problem ? undefined : replacement);
   }
 
+  function closeDialog() {
+    dialogRef.current?.close();
+    onClose();
+  }
+
   async function publish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || !selected) return;
@@ -115,16 +119,19 @@ export function RevisionDialog({
     try {
       const { status, body } = await uploadFileRequest(`${endpoint}?${query}`, selected, setProgress);
       if (status === 409 && readErrorCode(body) === "STALE_REVISION") {
+        dialogRef.current?.close();
         onStale();
         return;
       }
       if (status === 401 || status === 404 || status === 410) {
+        dialogRef.current?.close();
         onUnavailable(status);
         return;
       }
       if (status >= 200 && status < 300) {
         const version = readPublishedRevision(body);
         if (version !== undefined) {
+          dialogRef.current?.close();
           onPublished(version);
           return;
         }
@@ -140,7 +147,7 @@ export function RevisionDialog({
 
   return (
     <dialog className="item-dialog revision-dialog" ref={dialogRef} aria-labelledby="revision-title"
-      onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }}>
+      onCancel={(event) => { event.preventDefault(); if (!saving) closeDialog(); }}>
       <form onSubmit={publish}>
         <h2 id="revision-title">Publish revision</h2>
         <p className="dialog-item-name">{file.name}</p>
@@ -160,7 +167,7 @@ export function RevisionDialog({
         )}
         {error && <p className="notice notice-error" role="alert">{error}</p>}
         <div className="dialog-actions">
-          <button className="button button-secondary" type="button" disabled={saving} onClick={onClose}>Cancel</button>
+          <button className="button button-secondary" type="button" disabled={saving} onClick={closeDialog}>Cancel</button>
           <button className="button button-primary" type="submit" disabled={saving || !selected}>
             {saving ? "Publishing…" : "Publish revision"}
           </button>

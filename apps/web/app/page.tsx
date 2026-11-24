@@ -58,7 +58,7 @@ export default function HomePage() {
   }, [attempt]);
 
   if (session.status === "signed-in") {
-    return <Workspace user={session.user} onSessionExpired={expireSession} />;
+    return <Workspace key={session.user.id} user={session.user} onSessionExpired={expireSession} />;
   }
 
   return (

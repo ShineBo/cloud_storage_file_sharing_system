@@ -6,6 +6,7 @@
   --text: #192a24;
   --muted: #50625a;
   --line: #dce5dd;
+  --control-border: #788c7e;
   --accent: #165e48;
   --accent-hover: #104a38;
 }
@@ -150,7 +151,7 @@ h2 {
   color: white;
 }
 
-.button-primary:not(:disabled):hover {
+.button-primary:not(:disabled, [aria-disabled="true"]):hover {
   background: var(--accent-hover);
 }
 
@@ -160,12 +161,13 @@ h2 {
   color: var(--text);
 }
 
-.button-secondary:not(:disabled):hover {
+.button-secondary:not(:disabled, [aria-disabled="true"]):hover {
   border-color: #93aa9b;
   background: #eff5ef;
 }
 
 .button:disabled,
+.button[aria-disabled="true"],
 .file-picker:has(input:disabled) .button {
   border-color: var(--line);
   background: #edf1ed;
@@ -539,6 +541,33 @@ h2 {
   flex: 0 0 auto;
 }
 
+.files-heading-actions,
+.files-heading-actions label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.files-heading-actions {
+  min-width: 0;
+}
+
+.files-heading-actions label {
+  font-size: .875rem;
+}
+
+.file-sort {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
 .folder-link {
   width: fit-content;
   max-width: 100%;
@@ -595,7 +624,7 @@ h2 {
   width: 100%;
   min-width: 0;
   padding: 7px 9px;
-  border: 1px solid #a9b8ae;
+  border: 1px solid var(--control-border);
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);
@@ -618,6 +647,10 @@ h2 {
 }
 
 @media (max-width: 880px) and (min-width: 721px), (max-width: 520px) {
+  .files-heading:has(.files-heading-actions) {
+    flex-wrap: wrap;
+  }
+
   .file-row {
     grid-template-columns: auto minmax(0, 1fr);
     column-gap: 12px;
@@ -930,7 +963,7 @@ h2 {
   width: 100%;
   min-height: 42px;
   padding: 8px 12px;
-  border: 1px solid #cbd7cd;
+  border: 1px solid var(--control-border);
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);

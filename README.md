@@ -22,6 +22,8 @@ Open [the local workspace](http://127.0.0.1:3080) and sign in as `alice` with th
 
 Open [Mailpit](http://127.0.0.1:18025) to inspect share emails and security alerts in the local stack.
 
+To try the sharing workflow, create a folder, open it, and upload `tests/fixtures/sample.pdf`. Select **Share** next to the file, choose Bob Example, and create the link. Use **Send email** if the link shows that email has yet to be sent. Open the matching message in Mailpit, then open its link in a separate browser profile and sign in as `bob`. To remove access, revoke the link as Alice and refresh Bob’s page.
+
 The Next.js frontend uses one NestJS API. The backend modules share PostgreSQL and private file storage. Docker Compose runs the frontend, API, PostgreSQL, Keycloak, Nginx, and the local mail relay.
 
 ## Protected backups and recovery

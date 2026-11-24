@@ -48,10 +48,19 @@ type WorkspaceData = {
 type Feedback = { kind: "error" | "success"; message: string };
 type Item = { type: "folder"; data: Folder } | { type: "file"; data: StoredFile };
 type ItemAction = { type: "create" } | { type: "rename" | "move" | "trash"; item: Item };
+type FileSort = "recent" | "name";
 
-const fileTypeList = new Intl.ListFormat(undefined, { type: "conjunction" });
+const fileTypeList = new Intl.ListFormat("en", { type: "conjunction" });
 const sizeFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
-const folderSort = new Intl.Collator(undefined, { numeric: true });
+const sortByName = new Intl.Collator(undefined, { numeric: true }).compare;
+
+function readFileSort(key: string): FileSort {
+  try {
+    return window.localStorage.getItem(key) === "name" ? "name" : "recent";
+  } catch {
+    return "recent";
+  }
+}
 
 function validateFile(file: File, policy: StoragePolicy) {
   if (file.size === 0) return "This file is empty. Choose another file.";
@@ -176,6 +185,8 @@ export function Workspace({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const sortKey = `cloud-storage:files-sort:${user.id}`;
+  const [fileSort, setFileSort] = useState(() => readFileSort(sortKey));
   const [folderId, setFolderId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceData>();
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -253,11 +264,23 @@ export function Workspace({
   const breadcrumbs = workspace ? folderTrail(folderId, workspace.folders) : [];
   const children = workspace
     ? Array.from(workspace.folders.values()).filter((folder) => folder.parentId === folderId)
-      .sort((left, right) => folderSort.compare(left.name, right.name))
+      .sort((left, right) => sortByName(left.name, right.name))
     : [];
+  const files = workspace?.files ?? [];
+  const listedFiles = fileSort === "name" ? files.toSorted((left, right) => sortByName(left.name, right.name)) : files;
   const canEdit = loadStatus === "ready" && !uploading && !signingOut;
   const policy = workspace?.policy;
   const formats = uploadFormats(policy?.allowedMimeTypes);
+
+  function changeFileSort(event: ChangeEvent<HTMLSelectElement>) {
+    const value = event.currentTarget.value === "name" ? "name" : "recent";
+    setFileSort(value);
+    try {
+      window.localStorage.setItem(sortKey, value);
+    } catch {
+      // Sorting still works for the current visit when browser storage is unavailable.
+    }
+  }
 
   function reloadWorkspace() {
     setLoadStatus("loading");
@@ -479,10 +502,19 @@ export function Workspace({
           <section className="panel files-panel" aria-labelledby="files-title">
             <div className="files-heading">
               <h2 id="files-title" ref={headingRef} tabIndex={-1}>{currentFolder?.name ?? "Files"}</h2>
-              <button className="button button-secondary" type="button" disabled={!canEdit}
-                onClick={() => setAction({ type: "create" })}>
-                New folder
-              </button>
+              <div className="files-heading-actions">
+                <div className="file-sort">
+                  <label htmlFor="file-sort">Sort files</label>
+                  <select id="file-sort" value={fileSort} disabled={!canEdit} onChange={changeFileSort}>
+                    <option value="recent">Newest first</option>
+                    <option value="name">Name A–Z</option>
+                  </select>
+                </div>
+                <button className="button button-secondary" type="button" disabled={!canEdit}
+                  onClick={() => setAction({ type: "create" })}>
+                  New folder
+                </button>
+              </div>
             </div>
             {itemFeedback && <WorkspaceNotice feedback={itemFeedback} className="item-notice" />}
             {loadStatus === "loading" && <p className="files-status" role="status">Loading files…</p>}
@@ -495,7 +527,7 @@ export function Workspace({
               </div>
             )}
             {loadStatus === "ready" && workspace && (
-              children.length || workspace.files.length ? (
+              children.length || listedFiles.length ? (
                 <ul className="file-list">
                   {children.map((folder) => (
                     <li className="file-row" key={folder.id}>
@@ -509,7 +541,7 @@ export function Workspace({
                       <ItemActions item={{ type: "folder", data: folder }} disabled={!canEdit} onAction={setAction} onShare={setShareItem} />
                     </li>
                   ))}
-                  {workspace.files.map((file) => (
+                  {listedFiles.map((file) => (
                     <li className="file-row" key={file.id}>
                       <div className="file-type" aria-hidden="true">{fileExtension(file.name).slice(1).toUpperCase()}</div>
                       <div className="file-info">
@@ -658,7 +690,7 @@ function ItemDialog({
     .map((folder) => ({ folder, trail: folderTrail(folder.id, folders) }))
     .filter(({ trail }) => !trail.some((folder) => folder.id === avoidFolderId))
     .map(({ folder, trail }) => ({ id: folder.id, label: trail.map((part) => part.name).join(" / ") }))
-    .sort((left, right) => folderSort.compare(left.label, right.label))
+    .sort((left, right) => sortByName(left.label, right.label))
     : [];
   const hasDestination = currentParent !== null || destinations.some((folder) => folder.id !== currentParent);
   const title = action.type === "create" ? "New folder" : action.type === "rename" ? "Rename item"

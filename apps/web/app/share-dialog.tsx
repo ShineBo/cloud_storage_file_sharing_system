@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { localDateTime } from "./local-date-time";
 
 type RecipientType = "employee" | "group";
 type Permission = "view" | "edit";
@@ -35,7 +36,6 @@ type ShareDialogProps = {
 
 const deliveryPollInterval = 1500;
 const deliveryPollLimit = 20;
-const expiryFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 async function shareError(response: Response, fallback: string) {
   if (response.status >= 400 && response.status < 500) {
@@ -68,6 +68,7 @@ function emailStatusText(delivery: ShareDelivery, active: boolean) {
 
 export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const historyTitleRef = useRef<HTMLHeadingElement>(null);
   const requestId = useRef<string>(null);
   const [attempt, setAttempt] = useState(0);
   const [directory, setDirectory] = useState<RecipientDirectory>();
@@ -225,6 +226,7 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
       const { share: revoked }: { share: Share } = await response.json();
       setShares((previous) => previous.map((entry) => entry.id === revoked.id ? revoked : entry));
       setNotice(`Link revoked for ${share.recipientName}.`);
+      historyTitleRef.current?.focus();
     } catch {
       setError("Revocation could not be confirmed. Try again.");
     } finally {
@@ -290,19 +292,24 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
     }
   }
 
+  function closeDialog() {
+    dialogRef.current?.close();
+    onClose();
+  }
+
   return (
     <dialog
       className="item-dialog share-dialog"
       ref={dialogRef}
       aria-labelledby="share-dialog-title"
-      onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}
+      onCancel={(event) => { event.preventDefault(); if (!busy) closeDialog(); }}
     >
       <div className="share-dialog-heading">
         <div>
           <h2 id="share-dialog-title">Share item</h2>
           <p className="dialog-item-name">{item.data.name}</p>
         </div>
-        <button className="button button-secondary" type="button" onClick={onClose} disabled={busy}>Close</button>
+        <button className="button button-secondary" type="button" onClick={closeDialog} disabled={busy}>Close</button>
       </div>
       {loadError ? (
         <>
@@ -369,7 +376,7 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
           {shares.length > 0 && (
             <section className="share-history" aria-labelledby="share-history-title">
               <div className="share-history-heading">
-                <h3 id="share-history-title">Shared links</h3>
+                <h3 id="share-history-title" ref={historyTitleRef} tabIndex={-1}>Shared links</h3>
                 <button className="button button-secondary" type="button" disabled={busy} onClick={() => void refreshStatus()}>
                   Refresh status
                 </button>
@@ -388,7 +395,7 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
                         {share.permission === "edit" ? "Can edit" : "Can view"}
                         {share.allowDownload && " · Download allowed"}
                         {share.revokedAt ? " · Revoked" : expired ? " · Expired" : " · Expires "}
-                        {active && <time dateTime={share.expiresAt}>{expiryFormat.format(expiry)}</time>}
+                        {active && <time dateTime={share.expiresAt}>{localDateTime.format(expiry)}</time>}
                       </p>
                       <div className="share-delivery">
                         <p className="file-meta" role="status">{emailStatusText(share.delivery, active)}</p>
@@ -407,7 +414,7 @@ export function ShareDialog({ item, onClose, onSessionExpired }: ShareDialogProp
                         <p className="file-meta share-access-failure">
                           An access attempt failed on{" "}
                           <time dateTime={share.lastAccessFailureAt}>
-                            {expiryFormat.format(new Date(share.lastAccessFailureAt))}
+                            {localDateTime.format(new Date(share.lastAccessFailureAt))}
                           </time>
                           .
                           {active
