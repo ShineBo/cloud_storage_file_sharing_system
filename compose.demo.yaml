@@ -34,6 +34,12 @@ services:
     image: cloud-storage-demo:local
     environment:
       PGDATABASE: cloud_storage_demo
+      SECURITY_ALERT_RULES: denied-shared-access,inactive-share-access
+
+  notification-worker:
+    image: cloud-storage-demo:local
+    environment:
+      PGDATABASE: cloud_storage_demo
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_TLS: plain
@@ -41,7 +47,6 @@ services:
       SMTP_USER: ""
       SMTP_PASSWORD: ""
       SECURITY_ALERT_TO: sam@northstar.example.test
-      SECURITY_ALERT_RULES: denied-shared-access,inactive-share-access
 
   web:
     image: cloud-storage-demo:local

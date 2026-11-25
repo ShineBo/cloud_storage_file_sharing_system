@@ -24,7 +24,27 @@ Open [Mailpit](http://127.0.0.1:18025) to inspect share emails and security aler
 
 To try the sharing workflow, create a folder, open it, and upload `tests/fixtures/sample.pdf`. Select **Share** next to the file, choose Bob Example, and create the link. Use **Send email** if the link shows that email has yet to be sent. Open the matching message in Mailpit, then open its link in a separate browser profile and sign in as `bob`. To remove access, revoke the link as Alice and refresh Bob’s page.
 
-The Next.js frontend uses one NestJS API. The backend modules share PostgreSQL and private file storage. Docker Compose runs the frontend, API, PostgreSQL, Keycloak, Nginx, and the local mail relay.
+The Next.js frontend uses one NestJS API for accounts and file operations. The API records share emails and security alerts in PostgreSQL. A separate `notification-worker` container claims and delivers the queued jobs over SMTP. If the worker stops, file operations stay available and pending jobs can be delivered when it returns. The API, web, migration and worker containers reuse one application image.
+
+## Run on a private Ubuntu VM
+
+On the VM, install Docker Engine and its Compose plugin. From the checkout, generate separate credentials and start the VM profile. Use `sudo docker` in the functions below if your account requires it.
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/app" -w /app \
+  node:24-bookworm-slim node scripts/demo-config.mjs --vm --logins
+
+vm_compose() {
+  docker compose --env-file .env.vm -p cloud-storage-vm -f compose.yaml \
+    -f compose.integrations.yaml -f compose.app.yaml -f compose.demo.yaml -f compose.vm.yaml "$@"
+}
+
+vm_compose build api
+vm_compose up -d --no-build --wait --wait-timeout 180
+vm_compose ps
+```
+
+From your workstation, forward the guest's loopback ports `3089` (app), `18089` (sign-in) and `18029` (Mailpit) over SSH. Use `http://localhost:3089` for the app and `http://localhost:18029` for Mailpit. The profile is for private use with synthetic Northstar accounts, Keycloak's development runtime and a captured email inbox. Database, file and identity data live in separate VM volumes. Keep `.env.vm` with the corresponding volumes. Use `vm_compose stop` to stop the app while retaining its data.
 
 ## Protected backups and recovery
 
@@ -55,7 +75,7 @@ Start `recovery_compose up -d backup-schedule` for an immediate backup and subse
 
 ### Restore into a fresh instance
 
-Start an empty database under a separate Compose project and choose an unused PostgreSQL port. The restore tool initializes a fresh file volume for that project and requires a matching identity issuer. Keep the target API offline during the restore and reuse the same organization issuer for restored accounts. Allow space for the complete set of recovered revisions and the temporary database dump as well as the restored database.
+Start an empty database under a separate Compose project and choose an unused PostgreSQL port. The restore tool initializes a fresh file volume for that project and requires a matching identity issuer. Keep the target API and notification worker offline during the restore and reuse the same organization issuer for restored accounts. Allow space for the complete set of recovered revisions and the temporary database dump as well as the restored database. To back up the VM profile, add `-f compose.recovery.yaml` to `vm_compose` after `compose.vm.yaml` and use the same private backup directory and key setup.
 
 ```sh
 recovery_target() {

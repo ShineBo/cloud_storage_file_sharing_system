@@ -1,0 +1,61 @@
+name: cloud-storage-vm
+
+x-vm-directory: &vm-directory
+  PGDATABASE: cloud_storage_vm
+  OIDC_ISSUER: http://localhost:18089/realms/se-final-class
+
+x-vm-image: &vm-image cloud-storage-vm:local
+x-vm-origin: &vm-origin http://localhost:3089
+x-vm-service: &vm-service
+  restart: unless-stopped
+  logging:
+    driver: local
+    options:
+      max-size: "5m"
+      max-file: "3"
+
+services:
+  db:
+    <<: *vm-service
+    ports: !reset []
+    environment:
+      POSTGRES_DB: cloud_storage_vm
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cloud_storage", "-d", "cloud_storage_vm"]
+
+  identity:
+    <<: *vm-service
+    ports: !override ["127.0.0.1:18089:8080"]
+    environment:
+      KC_HOSTNAME: http://localhost:18089
+      CLASS_APP_ORIGIN: *vm-origin
+
+  migrate:
+    image: *vm-image
+    environment: *vm-directory
+
+  api:
+    <<: *vm-service
+    image: *vm-image
+    environment:
+      <<: *vm-directory
+      APP_ORIGIN: *vm-origin
+
+  notification-worker:
+    <<: *vm-service
+    image: *vm-image
+    environment:
+      <<: *vm-directory
+      APP_ORIGIN: *vm-origin
+
+  web:
+    <<: *vm-service
+    image: *vm-image
+
+  proxy:
+    <<: *vm-service
+    ports: !override ["127.0.0.1:3089:8080"]
+
+  mailpit:
+    <<: *vm-service
+    ports: !override ["127.0.0.1:18029:8025"]

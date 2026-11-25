@@ -3,10 +3,16 @@ import { readFile } from "node:fs/promises";
 import { parseEnv } from "node:util";
 import { chromium } from "@playwright/test";
 
-const origin = "http://localhost:3088";
+const args = process.argv.slice(2);
+if (args.length > 1 || (args.length === 1 && args[0] !== "--vm")) {
+  throw new Error("Usage: node scripts/demo-data.mjs [--vm]");
+}
+const vm = args[0] === "--vm";
+const origin = vm ? "http://localhost:3089" : "http://localhost:3088";
+const config = vm ? ".env.vm" : ".env.demo";
 const assets = new URL("../fixtures/demo/", import.meta.url);
-const env = parseEnv(await readFile(new URL("../.env.demo", import.meta.url), "utf8"));
-if (env.CLASS_APP_ORIGIN !== origin) throw new Error("Load the local Northstar demo configuration first.");
+const env = parseEnv(await readFile(new URL(`../${config}`, import.meta.url), "utf8"));
+if (env.CLASS_APP_ORIGIN !== origin) throw new Error(`Expected ${origin} in ${config}.`);
 
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,

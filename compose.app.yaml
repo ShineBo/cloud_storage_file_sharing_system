@@ -45,13 +45,6 @@ services:
       OIDC_CLIENT_ID: cloud-storage
       OIDC_BROWSER_LOGOUT: "true"
       OIDC_CLIENT_SECRET: ${CLASS_OIDC_CLIENT_SECRET:?Run npm run local:configure}
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_TLS: ${SMTP_TLS:-plain}
-      SMTP_FROM: ${SMTP_FROM:-cloud-storage@example.test}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SECURITY_ALERT_TO: ${SECURITY_ALERT_TO-security-reviewer@example.test}
       SECURITY_ALERT_RULES: ${SECURITY_ALERT_RULES-denied-shared-access,inactive-share-access}
       FILE_STORAGE_PATH: /var/lib/cloud-storage/files
       FILE_MAX_BYTES: ${FILE_MAX_BYTES:-2000000000}
@@ -72,6 +65,39 @@ services:
       interval: 4s
       timeout: 4s
       retries: 15
+
+  notification-worker:
+    image: se-final-cloud-storage:local
+    pull_policy: never
+    command: ["node", "apps/api/dist/notification-worker.js"]
+    environment:
+      <<: *database
+      APP_ORIGIN: ${CLASS_APP_ORIGIN:-http://127.0.0.1:3080}
+      OIDC_ISSUER: ${CLASS_IDENTITY_ORIGIN:-http://127.0.0.1:18080}/realms/se-final-class
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_TLS: ${SMTP_TLS:-plain}
+      SMTP_FROM: ${SMTP_FROM:-cloud-storage@example.test}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SECURITY_ALERT_TO: ${SECURITY_ALERT_TO-security-reviewer@example.test}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 50s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          try {
+            const {mtimeMs} = require('node:fs').statSync('/tmp/cloud-notification-worker.heartbeat');
+            if (Date.now() - mtimeMs > 45000) process.exitCode = 1;
+          } catch { process.exitCode = 1; }
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   web:
     image: se-final-cloud-storage:local

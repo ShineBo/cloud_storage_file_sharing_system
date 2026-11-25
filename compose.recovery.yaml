@@ -6,7 +6,7 @@ x-recovery: &recovery
   pull_policy: never
   environment:
     PGHOST: db
-    PGDATABASE: cloud_storage
+    PGDATABASE: ${RECOVERY_DATABASE:-cloud_storage}
     PGUSER: cloud_storage
     PGPASSWORD: ${POSTGRES_PASSWORD:?Run npm run local:configure}
     OIDC_ISSUER: ${CLASS_IDENTITY_ORIGIN:-http://127.0.0.1:18080}/realms/se-final-class

@@ -1,8 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import nodemailer, { type Transporter } from "nodemailer";
-import { OidcService } from "../auth/oidc.service";
+import { notificationLoopbackHosts, readNotificationOrigin } from "./notification-origin";
 
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const SINGLE_ADDRESS = /^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 
 export function readMailbox(value: string | null | undefined) {
@@ -13,8 +12,6 @@ export function readMailbox(value: string | null | undefined) {
 @Injectable()
 export class SmtpService {
   private sender?: { address: string; transport: Transporter };
-
-  constructor(private readonly oidc: OidcService) {}
 
   async send(to: string, subject: string, text: string, messageKey: string) {
     const { address, transport } = this.sender ??= this.configure();
@@ -46,8 +43,8 @@ export class SmtpService {
     if (mode !== "plain" && mode !== "starttls" && mode !== "implicit") {
       throw new Error("SMTP TLS mode is invalid.");
     }
-    if (mode === "plain" && (user || !LOOPBACK.has(this.oidc.applicationOrigin.hostname) ||
-      (host !== "mailpit" && !LOOPBACK.has(host)))) {
+    if (mode === "plain" && (user || !notificationLoopbackHosts.has(readNotificationOrigin().hostname) ||
+      (host !== "mailpit" && !notificationLoopbackHosts.has(host)))) {
       throw new Error("Cleartext SMTP is limited to the local mail service.");
     }
 

@@ -11,7 +11,6 @@ import { FoldersService } from "./folders/folders.service";
 import { DatabaseService } from "./database.service";
 import { HealthController } from "./health.controller";
 import { NotificationService } from "./notifications/notification.service";
-import { SmtpService } from "./notifications/smtp.service";
 import { PoliciesController } from "./policies/policies.controller";
 import { PolicyService } from "./policies/policy.service";
 import { TrashController } from "./trash/trash.controller";
@@ -25,7 +24,7 @@ import { SharesService } from "./shares/shares.service";
     HealthController, AuthController, FilesController, FoldersController, SharesController, SharedContentController, AuditController,
     PoliciesController, TrashController,
   ],
-  providers: [DatabaseService, AuthService, OidcService, FilesService, FoldersService, SharesService, AuditService, SmtpService, NotificationService,
+  providers: [DatabaseService, AuthService, OidcService, FilesService, FoldersService, SharesService, AuditService, NotificationService,
     PolicyService, TrashService,
   ],
 })

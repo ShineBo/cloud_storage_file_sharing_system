@@ -6,11 +6,15 @@ const { Client } = pg;
 const migrations = new URL("../apps/api/migrations/", import.meta.url);
 const classFixtures = process.argv.includes("--class-fixtures");
 const demoFixtures = process.argv.includes("--northstar-demo-fixtures");
+const fixtureIssuers = new Map([
+  ["cloud_storage_demo", "http://localhost:18088/realms/se-final-class"],
+  ["cloud_storage_vm", "http://localhost:18089/realms/se-final-class"],
+]);
+const fixtureIssuer = fixtureIssuers.get(process.env.PGDATABASE);
 
 if (classFixtures && demoFixtures) throw new Error("Choose one directory fixture set.");
-if (demoFixtures && (process.env.PGDATABASE !== "cloud_storage_demo" || process.env.DATABASE_URL
-    || process.env.OIDC_ISSUER !== "http://localhost:18088/realms/se-final-class")) {
-  throw new Error("Use the isolated demo database and issuer to load Northstar fixtures.");
+if (demoFixtures && (!fixtureIssuer || process.env.DATABASE_URL || process.env.OIDC_ISSUER !== fixtureIssuer)) {
+  throw new Error("Use a matching isolated Northstar database and issuer to load its fixtures.");
 }
 
 async function seedDirectory(db) {

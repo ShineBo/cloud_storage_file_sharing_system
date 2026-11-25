@@ -19,6 +19,7 @@ jobs:
       STEP4_DB_CHECK: "1"
       STEP6_MAIL_CHECK: "1"
       STEP7_DB_CHECK: "1"
+      WORKER_SPLIT_CHECK: "1"
       MAILPIT_ENABLE_CHAOS: "true"
     steps:
       - uses: actions/checkout@v6
