@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { responseMessage } from "../file-transfer";
 import { localDateTime } from "../local-date-time";
-import { Header } from "../workspace";
+import { AppShell, useSession } from "../app-shell";
 
 type TrashItem = {
   id: string;
@@ -18,6 +18,7 @@ type State = { status: "loading" | "error" | "signed-out" } | { status: "ready";
 type Notice = { kind: "error" | "success"; message: string };
 
 export default function TrashPage() {
+  const { user } = useSession();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const resultsRef = useRef<HTMLHeadingElement>(null);
   const refreshRef = useRef<HTMLButtonElement>(null);
@@ -92,10 +93,8 @@ export default function TrashPage() {
   }
 
   return (
-    <>
-      <Header />
+    <AppShell section="trash" user={state.status === "signed-out" ? null : user} navigationLocked={!!restoringId}>
       <main className="workspace management-page">
-        <a className="shared-back" href="/">My files</a>
         <div className="workspace-heading">
           <h1 ref={headingRef} tabIndex={-1}>Trash</h1>
           <p>Restore items to their original location before the recovery deadline. Share links that are still valid can resume access after a restore.</p>
@@ -104,7 +103,10 @@ export default function TrashPage() {
           role={notice.kind === "error" ? "alert" : "status"}>{notice.message}</p>}
         {state.status === "loading" && <p className="entry-status" role="status">Loading Trash…</p>}
         {state.status === "signed-out" && (
-          <p className="notice notice-error" role="alert">Sign in to open your Trash.</p>
+          <div className="panel management-panel">
+            <p className="notice notice-error" role="alert">Sign in to open your Trash.</p>
+            <a className="button button-primary" href="/api/auth/login">Sign in</a>
+          </div>
         )}
         {state.status === "error" && (
           <div className="panel management-panel">
@@ -147,6 +149,6 @@ export default function TrashPage() {
           </section>
         )}
       </main>
-    </>
+    </AppShell>
   );
 }

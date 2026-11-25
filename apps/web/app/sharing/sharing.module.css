@@ -1,0 +1,222 @@
+.workspace {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+  padding: clamp(20px, 4vw, 40px);
+}
+
+.message,
+.empty {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 20px;
+  color: var(--muted);
+}
+
+.directions,
+.controls,
+.filter,
+.toolbar,
+.accessLabels,
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls,
+.toolbar {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.controls {
+  margin-bottom: 16px;
+}
+
+.directions {
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.directions button {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: .875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.directions button:hover {
+  background: var(--soft);
+}
+
+.directions button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.filter {
+  color: var(--muted);
+  font-size: .875rem;
+  font-weight: 650;
+}
+
+.filter select {
+  min-height: 44px;
+  padding: 7px 12px;
+  border: 1px solid var(--control-border, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.directory {
+  min-width: 0;
+  padding: 0;
+}
+
+.toolbar,
+.footer {
+  padding: 14px 20px;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.itemIcon {
+  display: grid;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--accent);
+}
+
+.fileIcon {
+  position: relative;
+  width: 13px;
+  height: 16px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.fileIcon::before {
+  position: absolute;
+  inset: 5px 2px auto;
+  height: 3px;
+  border-block: 1px solid currentColor;
+  content: "";
+}
+
+.itemDetails,
+.access {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.itemDetails h3 {
+  margin: 0;
+  font-size: .98rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  gap: 2px 8px;
+  color: var(--muted);
+  font-size: .82rem;
+  overflow-wrap: anywhere;
+}
+
+.meta span + span::before {
+  margin-inline-end: 8px;
+  content: "·";
+}
+
+.accessLabels .expired,
+.accessLabels .revoked {
+  background: var(--soft);
+  color: var(--muted);
+}
+
+.accessLabels .active {
+  background: #dff3e9;
+  color: #126048;
+}
+
+.accessLabels .unavailable {
+  background: #fff0d8;
+  color: #754815;
+}
+
+.action {
+  justify-self: end;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 850px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 8px;
+  }
+
+  .access {
+    grid-column: 1;
+    padding-inline-start: 48px;
+  }
+
+  .action {
+    grid-area: 1 / 2 / 3 / 3;
+  }
+}
+
+@media (max-width: 520px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .action {
+    grid-area: auto;
+    justify-self: start;
+    padding-inline-start: 48px;
+  }
+}

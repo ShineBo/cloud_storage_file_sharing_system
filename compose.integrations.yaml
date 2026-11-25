@@ -13,6 +13,13 @@ services:
     ports:
       - "127.0.0.1:${KEYCLOAK_HOST_PORT:-18080}:8080"
     volumes:
+      - identity_data:/opt/keycloak/data
+      - type: bind
+        source: ./fixtures/keycloak/cloud-storage-theme
+        target: /opt/keycloak/themes/cloud-storage
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: ./fixtures/keycloak/se-final-class-realm.json
         target: /opt/keycloak/data/import/se-final-class-realm.json
@@ -27,3 +34,6 @@ services:
     ports:
       - "127.0.0.1:${MAILPIT_WEB_HOST_PORT:-18025}:8025"
       - "127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-11025}:1025"
+
+volumes:
+  identity_data:

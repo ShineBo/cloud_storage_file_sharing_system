@@ -2,20 +2,17 @@
 
 import {
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
   useEffect,
   useRef,
   useState,
 } from "react";
+import { AppShell, type SessionUser } from "./app-shell";
+import { FilePreview } from "./file-preview";
 import { fileExtension, formatSize, responseMessage, uploadFileRequest, uploadFormats } from "./file-transfer";
 import { RevisionDetails, RevisionDialog, staleRevisionNotice, type Revision } from "./revision-dialog";
 import { ShareDialog } from "./share-dialog";
-
-export type User = {
-  id: string;
-  username: string;
-  displayName: string;
-};
 
 type Folder = {
   id: string;
@@ -30,11 +27,13 @@ type StoredFile = Revision & {
   size: number;
   createdAt: string;
   folderId: string | null;
+  mimeType: string;
 };
 
 type StoragePolicy = {
   maxFileBytes: number;
   quotaBytes: number;
+  usedBytes: number;
   availableBytes: number;
   allowedMimeTypes: string[];
 };
@@ -138,56 +137,32 @@ function itemErrorMessage(status: number, action: ItemAction) {
   }
 }
 
-export function Header({
-  user,
-  onSignOut,
-  signingOut = false,
-  uploading = false,
-}: {
-  user?: User;
-  onSignOut?: () => void;
-  signingOut?: boolean;
-  uploading?: boolean;
-}) {
-  return (
-    <header className="site-header">
-      <div className="header-content">
-        <div className="brand">
-          <span className="brand-icon" aria-hidden="true">
-            <span className="folder-icon" />
-          </span>
-          <span>Cloud Storage</span>
-        </div>
-        {user && (
-          <div className="account">
-            <span className="account-name">{user.displayName || user.username}</span>
-            <button
-              className="button button-secondary"
-              type="button"
-              onClick={onSignOut}
-              disabled={signingOut || uploading}
-            >
-              {signingOut ? "Signing out…" : "Sign out"}
-            </button>
-          </div>
-        )}
-      </div>
-    </header>
-  );
+function folderFromLocation() {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("folder");
+}
+
+function setFolderLocation(id: string | null, replace = false) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set("folder", id);
+  else url.searchParams.delete("folder");
+  if (replace) window.history.replaceState(null, "", url);
+  else window.history.pushState(null, "", url);
 }
 
 export function Workspace({
   user,
   onSessionExpired,
 }: {
-  user: User;
+  user: SessionUser;
   onSessionExpired: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const sortKey = `cloud-storage:files-sort:${user.id}`;
   const [fileSort, setFileSort] = useState(() => readFileSort(sortKey));
-  const [folderId, setFolderId] = useState<string | null>(null);
+  const [folderId, setFolderId] = useState(folderFromLocation);
+  const [search, setSearch] = useState("");
   const [workspace, setWorkspace] = useState<WorkspaceData>();
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -199,19 +174,38 @@ export function Workspace({
   const [action, setAction] = useState<ItemAction>();
   const [shareItem, setShareItem] = useState<Item>();
   const [revisionFile, setRevisionFile] = useState<StoredFile>();
-  const [signingOut, setSigningOut] = useState(false);
-  const [signOutFailed, setSignOutFailed] = useState(false);
-  const [canAdminister, setCanAdminister] = useState(false);
+  const [previewFile, setPreviewFile] = useState<StoredFile>();
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/admin/policy", { cache: "no-store", signal: controller.signal })
-      .then((response) => {
-        if (!controller.signal.aborted) setCanAdminister(response.ok);
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, []);
+    function syncFolder() {
+      const nextId = folderFromLocation();
+      if (nextId === folderId) return;
+      if (uploading) {
+        setFolderLocation(folderId, true);
+        return;
+      }
+      if (inputRef.current) inputRef.current.value = "";
+      setSelectedFile(null);
+      setSearch("");
+      setUploadFeedback(undefined);
+      setItemFeedback(undefined);
+      setLoadStatus("loading");
+      setFolderId(nextId);
+    }
+    window.addEventListener("popstate", syncFolder);
+    return () => window.removeEventListener("popstate", syncFolder);
+  }, [folderId, uploading]);
+
+  useEffect(() => {
+    if (!uploading) return;
+    function warnLeaving(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnLeaving);
+    return () => window.removeEventListener("beforeunload", warnLeaving);
+  }, [uploading]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -231,7 +225,8 @@ export function Workspace({
           onSessionExpired();
           return;
         }
-        if (folderId && filesResponse.status === 404) {
+        if (folderId && [400, 404].includes(filesResponse.status)) {
+          setFolderLocation(null, true);
           setFolderId(null);
           setSelectedFile(null);
           if (inputRef.current) inputRef.current.value = "";
@@ -267,8 +262,14 @@ export function Workspace({
       .sort((left, right) => sortByName(left.name, right.name))
     : [];
   const files = workspace?.files ?? [];
-  const listedFiles = fileSort === "name" ? files.toSorted((left, right) => sortByName(left.name, right.name)) : files;
-  const canEdit = loadStatus === "ready" && !uploading && !signingOut;
+  const query = search.trim().toLocaleLowerCase();
+  const matches = ({ name }: { name: string }) => name.toLocaleLowerCase().includes(query);
+  const visibleFolders = children.filter(matches);
+  const matchedFiles = files.filter(matches);
+  const listedFiles = fileSort === "name"
+    ? matchedFiles.toSorted((left, right) => sortByName(left.name, right.name)) : matchedFiles;
+  const resultCount = visibleFolders.length + listedFiles.length;
+  const canEdit = loadStatus === "ready" && !uploading;
   const policy = workspace?.policy;
   const formats = uploadFormats(policy?.allowedMimeTypes);
 
@@ -295,8 +296,10 @@ export function Workspace({
   }
 
   function openFolder(id: string | null) {
-    if (uploading || signingOut || id === folderId) return;
+    if (uploading || id === folderId) return;
+    setFolderLocation(id);
     if (inputRef.current) inputRef.current.value = "";
+    setSearch("");
     setSelectedFile(null);
     setUploadFeedback(undefined);
     setItemFeedback(undefined);
@@ -305,19 +308,31 @@ export function Workspace({
     headingRef.current?.focus();
   }
 
+  function selectFile(file: File) {
+    if (!policy || !canEdit) return;
+    const error = validateFile(file, policy);
+    setSelectedFile(error ? null : file);
+    setUploadFeedback(error ? { kind: "error", message: error } : undefined);
+    if (error && inputRef.current) inputRef.current.value = "";
+  }
+
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
-    setUploadFeedback(undefined);
-    setSelectedFile(null);
-    if (!file || !policy) return;
+    if (file) selectFile(file);
+  }
 
-    const error = validateFile(file, policy);
-    if (error) {
-      event.currentTarget.value = "";
-      setUploadFeedback({ kind: "error", message: error });
+  function dropFile(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setDragging(false);
+    if (!canEdit) return;
+    if (event.dataTransfer.files.length !== 1) {
+      setSelectedFile(null);
+      if (inputRef.current) inputRef.current.value = "";
+      setUploadFeedback({ kind: "error", message: "Drop one file at a time." });
       return;
     }
-    setSelectedFile(file);
+    if (inputRef.current) inputRef.current.value = "";
+    selectFile(event.dataTransfer.files[0]);
   }
 
   async function submitUpload(event: FormEvent<HTMLFormElement>) {
@@ -401,119 +416,58 @@ export function Workspace({
     }
   }
 
-  async function signOut() {
-    setSigningOut(true);
-    setSignOutFailed(false);
-    try {
-      const response = await fetch("/api/auth/logout", { method: "POST" });
-      if (!response.ok && response.status !== 401) throw new Error("Sign-out failed.");
-      window.location.replace("/");
-    } catch {
-      setSignOutFailed(true);
-      setSigningOut(false);
-    }
-  }
-
   return (
-    <>
-      <Header user={user} onSignOut={signOut} signingOut={signingOut} uploading={uploading} />
-      <main className="workspace">
-        <div className="workspace-heading workspace-heading-with-nav">
+    <AppShell user={user} section="files" navigationLocked={uploading}>
+      <main className="workspace file-workspace">
+        <header className="workspace-heading page-heading workspace-hero">
           <div>
             <h1>My files</h1>
-            <p>Organize and share files from your private workspace.</p>
+            <p>Organize, preview, and share files from your private workspace.</p>
           </div>
-          <nav className="workspace-nav" aria-label="Workspace pages">
-            <a className="button button-secondary" href="/trash" aria-disabled={uploading || signingOut}
-              onClick={(event) => { if (uploading || signingOut) event.preventDefault(); }}>Trash</a>
-            {canAdminister && <a className="button button-secondary" href="/admin" aria-disabled={uploading || signingOut}
-              onClick={(event) => { if (uploading || signingOut) event.preventDefault(); }}>Administration</a>}
-          </nav>
-        </div>
-        {breadcrumbs.length > 0 && (
-          <nav className="breadcrumbs" aria-label="Folder path">
-            <ol>
-              <li><button type="button" disabled={uploading || signingOut} onClick={() => openFolder(null)}>My files</button></li>
-              {breadcrumbs.map((folder) => (
-                <li key={folder.id}>
-                  <span aria-hidden="true" className="breadcrumb-separator">/</span>
-                  {folder.id === folderId ? (
-                    <span aria-current="location">{folder.name}</span>
-                  ) : (
-                    <button type="button" disabled={uploading || signingOut} onClick={() => openFolder(folder.id)}>
-                      {folder.name}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </nav>
-        )}
-        {signOutFailed && (
-          <p className="notice notice-error signout-notice" role="alert">
-            Sign-out could not be confirmed. Try signing out again.
-          </p>
-        )}
-        <div className="workspace-grid">
-          <section className="panel upload-panel" aria-labelledby="upload-title">
-            <h2 id="upload-title">Upload a file</h2>
-            {currentFolder && <p className="upload-destination">To {currentFolder.name}</p>}
-            <p id="file-limits" className="panel-description">
-              {fileTypeList.format(formats.map(({ name }) => name))}.{policy && ` Up to ${formatSize(policy.maxFileBytes)} per file.`}
-            </p>
-            {policy && (
-              <p className="storage-summary">
-                <strong>{formatSize(policy.availableBytes)} available</strong> of {formatSize(policy.quotaBytes)}
-              </p>
-            )}
-            <form className="upload-form" onSubmit={submitUpload}>
-              <label className="file-picker">
-                <input
-                  ref={inputRef}
-                  className="visually-hidden"
-                  type="file"
-                  name="file"
-                  accept={formats.flatMap(({ extensions }) => extensions).join(",")}
-                  aria-describedby="file-limits"
-                  disabled={!canEdit}
-                  onChange={chooseFile}
-                />
-                <span className="button button-secondary">Choose file</span>
-              </label>
-              {selectedFile && (
-                <p className="selection" role="status">
-                  <span>{selectedFile.name}</span>
-                  <span>{sizeFormat.format(selectedFile.size)} {selectedFile.size === 1 ? "byte" : "bytes"}</span>
-                </p>
-              )}
-              <button className="button button-primary" type="submit" disabled={!selectedFile || !canEdit}>
-                {uploading ? "Uploading…" : "Upload file"}
-              </button>
-              {uploading && (
-                <div className="upload-progress">
-                  <progress max={100} value={uploadPercent} aria-label="Upload progress" />
-                  {uploadPercent === 100 && <p role="status">Saving the file…</p>}
-                </div>
-              )}
-              {uploadFeedback && <WorkspaceNotice feedback={uploadFeedback} />}
-            </form>
-          </section>
-
+          <button className="button button-secondary" type="button" disabled={!canEdit}
+            onClick={() => setAction({ type: "create" })}>
+            <span className="button-plus" aria-hidden="true">+</span> New folder
+          </button>
+        </header>
+        <div className="workspace-grid file-workspace-grid">
           <section className="panel files-panel" aria-labelledby="files-title">
-            <div className="files-heading">
-              <h2 id="files-title" ref={headingRef} tabIndex={-1}>{currentFolder?.name ?? "Files"}</h2>
-              <div className="files-heading-actions">
+            <div className="files-heading file-browser-heading">
+              <div>
+                {breadcrumbs.length > 0 && (
+                  <nav className="breadcrumbs" aria-label="Folder path">
+                    <ol>
+                      <li><button type="button" disabled={uploading} onClick={() => openFolder(null)}>My files</button></li>
+                      {breadcrumbs.slice(0, -1).map((folder) => (
+                        <li key={folder.id}>
+                          <span aria-hidden="true" className="breadcrumb-separator">/</span>
+                          <button type="button" disabled={uploading} onClick={() => openFolder(folder.id)}>
+                            {folder.name}
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  </nav>
+                )}
+                <h2 id="files-title" ref={headingRef} tabIndex={-1}>{currentFolder?.name ?? "Files"}</h2>
+                {loadStatus === "ready" && <p className="file-meta" role="status">
+                  {resultCount} {resultCount === 1 ? "item" : "items"}{query ? " found" : ""}
+                </p>}
+              </div>
+              <div className="files-heading-actions file-browser-controls">
+                <label className="file-search">
+                  <span className="visually-hidden">Search this folder</span>
+                  <span className="search-icon" aria-hidden="true" />
+                  <input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)}
+                    placeholder="Search this folder" disabled={loadStatus !== "ready"} />
+                </label>
                 <div className="file-sort">
-                  <label htmlFor="file-sort">Sort files</label>
+                  <label className="visually-hidden" htmlFor="file-sort">Sort files</label>
+                  <span className="file-sort-label" aria-hidden="true">Sort</span>
                   <select id="file-sort" value={fileSort} disabled={!canEdit} onChange={changeFileSort}>
                     <option value="recent">Newest first</option>
                     <option value="name">Name A–Z</option>
                   </select>
                 </div>
-                <button className="button button-secondary" type="button" disabled={!canEdit}
-                  onClick={() => setAction({ type: "create" })}>
-                  New folder
-                </button>
               </div>
             </div>
             {itemFeedback && <WorkspaceNotice feedback={itemFeedback} className="item-notice" />}
@@ -527,11 +481,11 @@ export function Workspace({
               </div>
             )}
             {loadStatus === "ready" && workspace && (
-              children.length || listedFiles.length ? (
+              resultCount ? (
                 <ul className="file-list">
-                  {children.map((folder) => (
+                  {visibleFolders.map((folder) => (
                     <li className="file-row" key={folder.id}>
-                      <div className="file-type" aria-hidden="true"><span className="folder-icon" /></div>
+                      <div className="file-type file-type-folder" aria-hidden="true"><span className="folder-icon" /></div>
                       <div className="file-info">
                         <button className="folder-link" type="button" disabled={!canEdit} onClick={() => openFolder(folder.id)}>
                           {folder.name}
@@ -543,11 +497,14 @@ export function Workspace({
                   ))}
                   {listedFiles.map((file) => (
                     <li className="file-row" key={file.id}>
-                      <div className="file-type" aria-hidden="true">{fileExtension(file.name).slice(1).toUpperCase()}</div>
+                      <div className="file-type" data-type={fileExtension(file.name)} aria-hidden="true">
+                        {fileExtension(file.name).slice(1).toUpperCase()}
+                      </div>
                       <div className="file-info">
-                        <span className="file-name">{file.name}</span>
+                        <button className="folder-link" type="button" disabled={!canEdit} onClick={() => setPreviewFile(file)}>
+                          {file.name}
+                        </button>
                         <span className="file-meta">{formatSize(file.size)}</span>
-                        <RevisionDetails file={file} />
                       </div>
                       <ItemActions item={{ type: "file", data: file }} disabled={!canEdit}
                         onAction={setAction} onShare={setShareItem} onRevise={setRevisionFile} />
@@ -557,14 +514,74 @@ export function Workspace({
               ) : (
                 <div className="files-empty">
                   <div className="entry-icon" aria-hidden="true"><span className="folder-icon" /></div>
-                  <p className="empty-title">No files or folders yet</p>
-                  <p>Upload a file or create a folder here.</p>
+                  <p className="empty-title">{query ? "No matches in this folder" : "No files or folders yet"}</p>
+                  {query ? <button className="button button-secondary" onClick={() => setSearch("")}>Clear search</button>
+                    : <p>Upload a file or create a folder here.</p>}
                 </div>
               )
             )}
           </section>
+          <aside className="workspace-tools" aria-label="File tools">
+            <section className="panel upload-panel" aria-labelledby="upload-title">
+              <h2 id="upload-title">Upload a file</h2>
+              <p className="upload-destination">To {currentFolder?.name ?? "My files"}</p>
+              <form className="upload-form" onSubmit={submitUpload}>
+                <label className={`file-picker upload-drop${dragging ? " upload-drop-active" : ""}`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (canEdit && event.dataTransfer.types.includes("Files")) setDragging(true);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragging(false);
+                  }}
+                  onDrop={dropFile}>
+                  <input ref={inputRef} className="visually-hidden" type="file" name="file"
+                    accept={formats.flatMap(({ extensions }) => extensions).join(",")}
+                    aria-label="Choose file" aria-describedby="file-limits" disabled={!canEdit} onChange={chooseFile} />
+                  <span className="upload-arrow" aria-hidden="true">↑</span>
+                  <span className="button button-secondary">Choose file</span>
+                  <small>or drop a file here</small>
+                </label>
+                <p id="file-limits" className="panel-description">
+                  {fileTypeList.format(formats.map(({ name }) => name))}{policy && ` · Up to ${formatSize(policy.maxFileBytes)}`}
+                </p>
+                {selectedFile && <p className="selection" role="status">
+                  <span>{selectedFile.name}</span>
+                  <span>{sizeFormat.format(selectedFile.size)} {selectedFile.size === 1 ? "byte" : "bytes"}</span>
+                </p>}
+                <button className="button button-primary" type="submit" disabled={!selectedFile || !canEdit}>
+                  {uploading ? "Uploading…" : "Upload file"}
+                </button>
+                {uploading && (
+                  <div className="upload-progress">
+                    <progress max={100} value={uploadPercent} aria-label="Upload progress" />
+                    {uploadPercent === 100 && <p role="status">Saving the file…</p>}
+                  </div>
+                )}
+                {uploadFeedback && <WorkspaceNotice feedback={uploadFeedback} />}
+              </form>
+            </section>
+            {policy && (
+              <section className="panel quota-panel" aria-labelledby="storage-title">
+                <h2 id="storage-title">Storage quota</h2>
+                <div className="quota-overview">
+                  <p className="quota-used" title={`${sizeFormat.format(policy.usedBytes)} bytes used`}>
+                    <strong>{formatSize(policy.usedBytes)}</strong> used
+                  </p>
+                  <p className="quota-limit">of {formatSize(policy.quotaBytes)}</p>
+                </div>
+                <meter min={0} max={policy.quotaBytes} value={policy.quotaBytes - policy.availableBytes}
+                  aria-label="Used or reserved storage" />
+                <p className="storage-summary" title={`${sizeFormat.format(policy.availableBytes)} bytes available`}>
+                  {formatSize(policy.availableBytes)} available
+                </p>
+                <p className="file-meta">Older revisions and files in Trash count toward your account quota.</p>
+              </section>
+            )}
+          </aside>
         </div>
       </main>
+      {previewFile && <OwnedPreview file={previewFile} onClose={() => setPreviewFile(undefined)} />}
       {shareItem && (
         <ShareDialog item={shareItem} onClose={() => setShareItem(undefined)} onSessionExpired={onSessionExpired} />
       )}
@@ -590,8 +607,33 @@ export function Workspace({
           }}
         />
       )}
-    </>
+    </AppShell>
   );
+}
+
+function OwnedPreview({ file, onClose }: { file: StoredFile; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [attempt, setAttempt] = useState(0);
+  const endpoint = `/api/files/${encodeURIComponent(file.id)}`;
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
+
+  return <dialog ref={dialog} className="item-dialog preview-dialog" aria-labelledby="preview-title"
+    onCancel={(event) => { event.preventDefault(); onClose(); }}>
+    <div className="preview-heading">
+      <div>
+        <h2 id="preview-title">{file.name}</h2>
+        <p className="file-meta">{formatSize(file.size)}</p>
+        <RevisionDetails file={file} />
+      </div>
+      <button className="button button-secondary" onClick={onClose}>Close preview</button>
+    </div>
+    <FilePreview key={attempt} file={file} url={`${endpoint}/view`} onReload={() => setAttempt((previous) => previous + 1)} />
+    <a className="button button-primary preview-download" download href={`${endpoint}/download`}>Download file</a>
+  </dialog>;
 }
 
 function WorkspaceNotice({ feedback, className = "" }: { feedback: Feedback; className?: string }) {
@@ -618,40 +660,56 @@ function ItemActions({
   onShare: (item: Item) => void;
   onRevise?: (file: StoredFile) => void;
 }) {
+  const menu = useRef<HTMLDetailsElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function dismiss(event: PointerEvent) {
+      if (event.target instanceof Node && !menu.current?.contains(event.target)) menu.current?.removeAttribute("open");
+    }
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [menuOpen]);
+
+  function dismissMenu() {
+    if (!menu.current) return;
+    menu.current.open = false;
+    menu.current.querySelector("summary")?.focus();
+  }
+
   return (
-    <div className="item-actions">
-      <button className="button button-secondary" type="button"
-        aria-label={`Rename ${item.data.name}`} disabled={disabled}
-        onClick={() => onAction({ type: "rename", item })}>
-        Rename
-      </button>
-      <button className="button button-secondary" type="button"
-        aria-label={`Move ${item.data.name}`} disabled={disabled}
-        onClick={() => onAction({ type: "move", item })}>
-        Move
-      </button>
+    <div className="item-actions browser-actions">
       <button className="button button-secondary" type="button"
         aria-label={`Share ${item.data.name}`} disabled={disabled} onClick={() => onShare(item)}>
         Share
       </button>
-      <button className="button button-secondary" type="button"
-        aria-label={`Move ${item.data.name} to trash`} disabled={disabled}
-        onClick={() => onAction({ type: "trash", item })}>
-        Move to trash
-      </button>
       {item.type === "file" && (
-        <>
-          <button className="button button-secondary" type="button"
-            aria-label={`Publish revision for ${item.data.name}`} disabled={disabled}
-            onClick={() => onRevise?.(item.data)}>
-            Revise
-          </button>
-          <a className="button button-secondary" href={`/api/files/${encodeURIComponent(item.data.id)}/download`}
-            download aria-label={`Download ${item.data.name}`}>
-            Download
-          </a>
-        </>
+        <a className="button button-secondary" href={`/api/files/${encodeURIComponent(item.data.id)}/download`}
+          download aria-label={`Download ${item.data.name}`} aria-disabled={disabled || undefined}
+          onClick={(event) => { if (disabled) event.preventDefault(); }}>
+          Download
+        </a>
       )}
+      <details ref={menu} className="item-menu" onToggle={(event) => setMenuOpen(event.currentTarget.open)}
+        onKeyDown={(event) => { if (event.key === "Escape") dismissMenu(); }}>
+        <summary className="button button-secondary" aria-label={`More actions for ${item.data.name}`}
+          aria-disabled={disabled || undefined} onClick={(event) => { if (disabled) event.preventDefault(); }}>
+          <span aria-hidden="true">⋯</span>
+        </summary>
+        <div className="item-menu-list">
+          <button type="button" aria-label={`Rename ${item.data.name}`} disabled={disabled}
+            onClick={() => { dismissMenu(); onAction({ type: "rename", item }); }}>Rename</button>
+          <button type="button" aria-label={`Move ${item.data.name}`} disabled={disabled}
+            onClick={() => { dismissMenu(); onAction({ type: "move", item }); }}>Move</button>
+          {item.type === "file" && <button type="button"
+            aria-label={`Publish revision for ${item.data.name}`} disabled={disabled}
+            onClick={() => { dismissMenu(); onRevise?.(item.data); }}>Publish revision</button>}
+          <button className="item-menu-danger" type="button"
+            aria-label={`Move ${item.data.name} to trash`} disabled={disabled}
+            onClick={() => { dismissMenu(); onAction({ type: "trash", item }); }}>Move to trash</button>
+        </div>
+      </details>
     </div>
   );
 }

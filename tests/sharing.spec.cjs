@@ -133,6 +133,10 @@ test("owner creates a share in the browser, recipient signs in from the link, an
     const recipientPage = await recipient.newPage();
     await signIn(recipientPage, "bob", link.pathname);
     await expect(recipientPage).toHaveURL(link.href);
+    await recipientPage.goto("/sharing");
+    const receivedLink = recipientPage.getByRole("link", { name: `Open ${file.name}`, exact: true });
+    await expect(receivedLink).toHaveAttribute("href", link.pathname);
+    await receivedLink.click();
     await expect(recipientPage.getByRole("heading", { name: file.name, exact: true })).toBeVisible();
     const preview = recipientPage.waitForResponse((response) =>
       new URL(response.url()).pathname.endsWith(`/files/${file.id}/view`));
@@ -153,6 +157,17 @@ test("owner creates a share in the browser, recipient signs in from the link, an
     await assertDenied(await recipient.request.get(actionUrl(share, file, "download")), 410);
     await recipientPage.reload();
     await expect(recipientPage.getByText(/revoked/i).first()).toBeVisible();
+    const refreshedInbox = recipientPage.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/shares/incoming");
+    await recipientPage.goto("/sharing");
+    const inbox = await refreshedInbox;
+    expect(inbox.status()).toBe(200);
+    expect((await inbox.json()).shares.map(({ id }) => id)).not.toContain(share.id);
+    await expect(recipientPage.getByRole("link", { name: `Open ${file.name}`, exact: true })).toHaveCount(0);
+    await page.goto("/sharing");
+    await page.getByRole("button", { name: "Shared by me", exact: true }).click();
+    await page.getByLabel("Status", { exact: true }).selectOption("revoked");
+    await expect(page.getByRole("heading", { name: file.name, exact: true })).toBeVisible();
   } finally {
     await recipient.close();
   }

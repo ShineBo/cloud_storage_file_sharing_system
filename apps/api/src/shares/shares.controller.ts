@@ -19,6 +19,24 @@ export class SharesController {
     return this.shares.recipients(user.id);
   }
 
+  @Get("incoming")
+  @Header("Cache-Control", "private, no-store")
+  async incoming(@Req() request: FastifyRequest, @Query("cursor") cursor: unknown) {
+    const user = await this.auth.requireUser(request);
+    return this.shares.incoming(user.id, cursor);
+  }
+
+  @Get("outgoing")
+  @Header("Cache-Control", "private, no-store")
+  async outgoing(
+    @Req() request: FastifyRequest,
+    @Query("cursor") cursor: unknown,
+    @Query("status") status: unknown,
+  ) {
+    const user = await this.auth.requireUser(request);
+    return this.shares.outgoing(user.id, cursor, status);
+  }
+
   @Get()
   @Header("Cache-Control", "private, no-store")
   async list(

@@ -27,7 +27,12 @@ async function signIn(page, username, location = "/") {
 
 async function openWorkspace(page, username) {
   await signIn(page, username);
-  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  if (username === "security-reviewer") {
+    await expect(page.getByRole("heading", { name: "Security activity", exact: true })).toBeVisible();
+    await page.getByRole("navigation", { name: "Workspace pages" })
+      .getByRole("link", { name: "My files", exact: true }).click();
+  }
+  await expect(page.getByRole("heading", { name: "My files", exact: true })).toBeVisible();
 }
 
 async function initialFile(owner, origin) {
@@ -140,7 +145,11 @@ test("an editor publishes through the same link and a stale browser refreshes be
     await expect(oldEditor.getByText(/^Version 2 · Bob Example/)).toBeVisible();
     await expect(publishDialog(oldEditor)).toHaveCount(0);
     await page.reload();
-    await expect(page.getByText(/^Version 2 · Bob Example/)).toBeVisible();
+    await page.getByRole("button", { name: file.name, exact: true }).click();
+    const ownerPreview = page.getByRole("dialog", { name: file.name, exact: true });
+    await expect(ownerPreview.getByText(/^Version 2 · Bob Example/)).toBeVisible();
+    await ownerPreview.getByRole("button", { name: "Close preview", exact: true }).click();
+    await page.getByLabel(`More actions for ${file.name}`, { exact: true }).click();
     await expect(page.getByRole("button", { name: `Publish revision for ${file.name}` })).toBeVisible();
   } finally {
     await Promise.all([editorContext.close(), oldContext.close()]);

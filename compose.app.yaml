@@ -43,6 +43,7 @@ services:
       OIDC_ISSUER: ${CLASS_IDENTITY_ORIGIN:-http://127.0.0.1:18080}/realms/se-final-class
       OIDC_BACKCHANNEL_URL: http://identity:8080
       OIDC_CLIENT_ID: cloud-storage
+      OIDC_BROWSER_LOGOUT: "true"
       OIDC_CLIENT_SECRET: ${CLASS_OIDC_CLIENT_SECRET:?Run npm run local:configure}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}

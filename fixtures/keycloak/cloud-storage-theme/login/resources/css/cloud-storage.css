@@ -1,0 +1,271 @@
+body#keycloak-bg {
+  --cloud-background: #f6f8f5;
+  --cloud-surface: #fff;
+  --cloud-ink: #172621;
+  --cloud-pine: #19513f;
+  --cloud-pine-hover: #103b2d;
+  --cloud-muted: #4d6056;
+  --cloud-line: #dce5df;
+  --cloud-field-line: #7e9085;
+  --cloud-focus: #216a51;
+  --cloud-error: #982f29;
+  --cloud-type: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-height: 100vh;
+  margin: 0;
+  background: radial-gradient(ellipse at 50% 0%, #e5eee7 0, transparent 44%), var(--cloud-background);
+  color: var(--cloud-ink);
+  font-family: var(--cloud-type);
+  color-scheme: light;
+}
+
+#keycloak-bg .pf-v5-c-login {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: clamp(16px, 4vw, 38px);
+  place-items: center;
+  background: transparent;
+}
+
+#keycloak-bg .pf-v5-c-login__container {
+  --pf-v5-c-login__container--GridTemplateColumns: minmax(0, 1fr);
+  grid-template-areas: "header" "main";
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  gap: 14px;
+  width: min(100%, 464px);
+  margin: 0;
+  padding: 0;
+}
+
+#keycloak-bg #kc-header {
+  margin: 0;
+  justify-self: start;
+}
+
+#keycloak-bg #kc-header-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cloud-ink) !important;
+  font: 700 .99rem/1.3 var(--cloud-type);
+  letter-spacing: -.02em;
+  text-align: start;
+  text-transform: none;
+}
+
+#keycloak-bg #kc-header-wrapper::before {
+  content: "";
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background:
+    linear-gradient(#fff, #fff) 10px 12px / 6px 1.5px no-repeat,
+    linear-gradient(#fff, #fff) 10px 12px / 1.5px 4px no-repeat,
+    var(--cloud-pine);
+}
+
+#keycloak-bg #kc-header-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: 15px auto auto 10px;
+  width: 16px;
+  height: 10px;
+  border: 1.5px solid white;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+#keycloak-bg .pf-v5-c-login__main {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--cloud-line);
+  border-radius: 20px;
+  background: var(--cloud-surface);
+  box-shadow: 0 20px 56px rgb(28 54 42 / 9%);
+}
+
+#keycloak-bg .pf-v5-c-login__main-header {
+  padding: clamp(20px, 6vw, 34px) clamp(18px, 6vw, 34px) 5px;
+  border-top: 0;
+}
+
+#keycloak-bg #kc-page-title {
+  color: var(--cloud-ink);
+  font: 710 clamp(1.65rem, 5.7vw, 2.15rem)/1.13 var(--cloud-type);
+  letter-spacing: -.04em;
+  overflow-wrap: anywhere;
+}
+
+#keycloak-bg .pf-v5-c-login__main-body {
+  padding: 19px clamp(18px, 6vw, 34px) 22px;
+  color: var(--cloud-ink);
+}
+
+#keycloak-bg #kc-form-login {
+  row-gap: 14px;
+}
+
+#keycloak-bg .pf-v5-c-form__label {
+  color: var(--cloud-ink);
+  font: 650 .9rem/1.35 var(--cloud-type);
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-form-control {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  border: 1px solid var(--cloud-field-line);
+  border-radius: 8px;
+  background: var(--cloud-surface);
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-form-control::before,
+#keycloak-bg #kc-form-login .pf-v5-c-form-control::after {
+  border: 0;
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-form-control:focus-within {
+  border-color: var(--cloud-focus);
+  outline: 2px solid var(--cloud-focus);
+  outline-offset: 1px;
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-form-control.pf-m-error {
+  border-color: var(--cloud-error);
+}
+
+#keycloak-bg #kc-form-login input {
+  min-width: 0;
+  padding: 9px 11px;
+  color: var(--cloud-ink);
+  font: 400 1rem/1.35 var(--cloud-type);
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-form-control input {
+  width: 100%;
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-form-control input:focus {
+  outline: none;
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-input-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 7px;
+}
+
+#keycloak-bg #kc-form-login .pf-v5-c-input-group__item {
+  min-width: 0;
+}
+
+#keycloak-bg #kc-form-login [data-password-toggle] {
+  min-width: 46px;
+  min-height: 46px;
+  border: 1px solid var(--cloud-field-line);
+  border-radius: 8px;
+  background: var(--cloud-surface);
+  color: var(--cloud-pine);
+}
+
+#keycloak-bg #kc-form-login [data-password-toggle]::after,
+#keycloak-bg :is(#kc-login, #kc-logout)::after {
+  border: 0;
+}
+
+#keycloak-bg #kc-form-login [data-password-toggle]:hover {
+  background: #eaf2ec;
+}
+
+#keycloak-bg :is(#kc-login, #kc-logout) {
+  min-height: 46px;
+  border-radius: 8px;
+  background: var(--cloud-pine);
+  color: white;
+  font: 680 .96rem/1.35 var(--cloud-type);
+}
+
+#keycloak-bg :is(#kc-login, #kc-logout):hover {
+  background: var(--cloud-pine-hover);
+}
+
+#keycloak-bg :is(#kc-login, #kc-logout):disabled {
+  background: #e7ede8;
+  color: var(--cloud-muted);
+}
+
+#keycloak-bg .kc-feedback-text {
+  color: var(--cloud-error);
+}
+
+#keycloak-bg :is(button, select, a):focus-visible {
+  outline: 2px solid var(--cloud-focus);
+  outline-offset: 3px;
+}
+
+#keycloak-bg .cloud-home {
+  padding: 7px clamp(18px, 6vw, 34px) clamp(18px, 6vw, 29px);
+}
+
+#keycloak-bg .cloud-home a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--cloud-pine);
+  font-size: .88rem;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: .15em;
+}
+
+#keycloak-bg .cloud-home a::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-bottom: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+
+#keycloak-bg #kc-logout-confirm .instruction {
+  margin-bottom: 16px;
+  color: var(--cloud-muted);
+}
+
+#keycloak-bg .pf-v5-c-input-group:has(#reset-login) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#keycloak-bg #reset-login {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--cloud-field-line);
+  border-radius: 8px;
+  background: var(--cloud-surface);
+  color: var(--cloud-pine);
+  font: 650 .85rem/1.3 var(--cloud-type);
+}
+
+#keycloak-bg #reset-login i { display: none; }
+
+#keycloak-bg #reset-login .kc-tooltip-text {
+  position: static;
+  display: inline;
+  visibility: visible;
+  transform: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  white-space: normal;
+}

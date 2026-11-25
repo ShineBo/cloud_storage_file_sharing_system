@@ -153,6 +153,20 @@ export class AuthService {
     return user;
   }
 
+  async profile(request: FastifyRequest) {
+    const user = await this.requireUser(request);
+    const { rows: [capabilities] } = await this.database.query<{
+      administration: boolean;
+      reviewActivity: boolean;
+    }>(
+      `SELECT
+         EXISTS (SELECT 1 FROM policy_admins WHERE employee_id = $1) AS administration,
+         EXISTS (SELECT 1 FROM audit_reviewers WHERE employee_id = $1) AS "reviewActivity"`,
+      [user.id],
+    );
+    return { ...user, capabilities };
+  }
+
   requireSameOrigin(request: FastifyRequest) {
     if (request.headers.origin !== this.oidc.applicationOrigin.origin) {
       throw new ForbiddenException("A same-origin request is required.");
@@ -181,6 +195,7 @@ export class AuthService {
       );
     }
 
-    return [authCookie("se_session", "", 0, secure), this.clearLoginCookie()];
+    const location = session ? await this.oidc.browserLogoutUrl().catch(() => undefined) : undefined;
+    return { location, cookies: [authCookie("se_session", "", 0, secure), this.clearLoginCookie()] };
   }
 }

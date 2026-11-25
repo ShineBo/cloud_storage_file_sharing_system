@@ -1,7 +1,10 @@
 {
   "realm": "se-final-class",
   "displayName": "Cloud Storage",
+  "displayNameHtml": "Cloud Storage",
+  "loginTheme": "cloud-storage",
   "enabled": true,
+  "rememberMe": false,
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "groups": [

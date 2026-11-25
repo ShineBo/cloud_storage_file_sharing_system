@@ -28,7 +28,9 @@ async function signIn(context, username) {
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(password);
   await page.locator("#kc-login").click();
-  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  const heading = username === "it-admin" ? "Operations console"
+    : username === "security-reviewer" ? "Security activity" : "My files";
+  await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
   return page;
 }
 
@@ -127,6 +129,9 @@ test("IT can save policy in the browser and enforce type, quota, link and retent
     expect(quota).toBeLessThan(original.quotaBytes);
 
     await adminPage.goto("/admin");
+    await adminPage.getByRole("button", { name: "Check now", exact: true }).click();
+    await expect(adminPage.getByText("Responding", { exact: true })).toBeVisible();
+    await expect(adminPage.getByText("Ready", { exact: true })).toBeVisible();
     const pdf = adminPage.getByRole("checkbox", { name: "PDF", exact: true });
     await expect(pdf).toBeChecked();
     await pdf.uncheck();

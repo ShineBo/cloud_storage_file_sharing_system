@@ -1,0 +1,318 @@
+.page {
+  display: grid;
+  gap: 20px;
+  width: 100%;
+  max-width: 1140px;
+  margin-inline: auto;
+  padding: clamp(20px, 4vw, 42px) clamp(16px, 3.5vw, 42px) 48px;
+}
+
+.feedback {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.metric {
+  padding: clamp(14px, 2.2vw, 22px);
+}
+
+.metric dt {
+  color: var(--muted);
+  font-size: .875rem;
+  font-weight: 650;
+}
+
+.metric dd {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+}
+
+.metric dd strong {
+  font-size: clamp(1.375rem, 3vw, 1.9rem);
+  line-height: 1.2;
+  letter-spacing: -.03em;
+}
+
+.metric dd span,
+.description,
+.resultCount,
+.pagination span,
+.checkTime {
+  color: var(--muted);
+  font-size: .875rem;
+}
+
+.sectionNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.sectionNav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 4px 0;
+  color: var(--accent);
+  font-size: .875rem;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.section {
+  display: grid;
+  gap: 18px;
+  padding: clamp(15px, 2.6vw, 26px);
+  scroll-margin-top: 76px;
+}
+
+.sectionHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+
+.sectionHeader .description {
+  margin-top: 3px;
+}
+
+.policyForm {
+  display: grid;
+  gap: 20px;
+}
+
+.fileTypes {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fileTypes legend,
+.control label {
+  margin: 0;
+  padding: 0;
+  font-size: .875rem;
+  font-weight: 650;
+}
+
+.fileTypeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.fileTypeList label {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: .875rem;
+  cursor: pointer;
+}
+
+.fileTypeList input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.policyFields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.control {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  align-content: start;
+}
+
+.control input,
+.control select {
+  display: block;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: .95rem;
+}
+
+.formActions,
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.accountControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.accountList,
+.checkList {
+  margin: 0;
+  padding: 0;
+  border-block: 1px solid var(--line);
+  list-style: none;
+}
+
+.accountList li,
+.checkRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7rem, .42fr) auto;
+  gap: 9px 14px;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.accountList li + li,
+.checkRow + .checkRow {
+  border-top: 1px solid var(--line);
+}
+
+.accountList li > span,
+.checkRow > span {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.accountList li button {
+  min-width: 102px;
+  justify-self: end;
+}
+
+.accountName {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.accountName strong,
+.checkRow h3 {
+  font-size: .95rem;
+  font-weight: 650;
+}
+
+.accountName span {
+  color: var(--muted);
+  font-size: .8125rem;
+}
+
+.checkRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-block: 13px;
+}
+
+.checkRow h3 {
+  margin: 0;
+}
+
+.checkTime {
+  margin-top: 10px;
+}
+
+.empty {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.neutral,
+.positive,
+.attention,
+.problem {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 99px;
+  padding: 3px 9px;
+  font-size: .8125rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.neutral {
+  background: #edf2ef;
+  color: #354b40;
+}
+
+.positive {
+  background: #e4f3e9;
+  color: #1e5940;
+}
+
+.attention {
+  background: #fbefd9;
+  color: #79490d;
+}
+
+.problem {
+  background: #fae8e5;
+  color: #80352a;
+}
+
+@media (max-width: 750px) {
+  .policyFields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 565px) {
+  .policyFields,
+  .accountControls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .accountList li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .accountName {
+    grid-column: 1 / -1;
+  }
+
+  .checkRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 360px) {
+  .overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

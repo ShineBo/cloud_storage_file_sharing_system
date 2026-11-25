@@ -31,6 +31,9 @@ test("an employee can upload and download privately, and sign out", async ({ pag
   expect((await request.get("/api/files")).status()).toBe(401);
   await signIn(page, "alice");
   await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  const storageMeter = page.getByLabel("Used or reserved storage");
+  await expect(storageMeter).toBeVisible();
+  const before = await (await page.request.get("/api/files/policy")).json();
   await expect(page.locator('input[name="file"]')).toBeEnabled();
   await page.locator('input[name="file"]').setInputFiles({ name: privateName, mimeType: "image/png", buffer: bytes });
   const uploaded = page.waitForResponse((response) =>
@@ -39,6 +42,23 @@ test("an employee can upload and download privately, and sign out", async ({ pag
   const uploadResponse = await uploaded;
   expect(uploadResponse.status()).toBe(201);
   const { file } = await uploadResponse.json();
+
+  const after = await (await page.request.get("/api/files/policy")).json();
+  expect(after.usedBytes).toBe(before.usedBytes + bytes.length);
+  expect(after.availableBytes).toBe(before.availableBytes - bytes.length);
+  await expect(storageMeter).toHaveAttribute("value", String(after.quotaBytes - after.availableBytes));
+
+  const search = page.getByRole("searchbox", { name: "Search this folder" });
+  await search.fill("no matching file");
+  await expect(page.getByText("No matches in this folder")).toBeVisible();
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await expect(page.getByRole("link", { name: "Administration", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Security activity", exact: true })).toHaveCount(0);
+  const viewed = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/files/${file.id}/view`);
+  await page.getByRole("button", { name: privateName, exact: true }).click();
+  expect((await viewed).status()).toBe(200);
+  await expect(page.getByRole("img", { name: `Preview of ${privateName}` })).toBeVisible();
+  await page.getByRole("button", { name: "Close preview" }).click();
 
   const downloadLink = page.getByRole("link", { name: `Download ${privateName}` }).and(
     page.locator(`a[href="/api/files/${file.id}/download"]`)
@@ -56,6 +76,7 @@ test("an employee can upload and download privately, and sign out", async ({ pag
     await signIn(peer, "casey");
     await expect(peer.getByRole("heading", { name: "My files" })).toBeVisible();
     expect((await other.request.get(`/api/files/${file.id}/download`)).status()).toBe(404);
+    expect((await other.request.get(`/api/files/${file.id}/view`)).status()).toBe(404);
   } finally {
     await other.close();
   }
@@ -66,8 +87,27 @@ test("an employee can upload and download privately, and sign out", async ({ pag
   });
   expect(unsupported.status()).toBe(415);
   await page.getByRole("button", { name: "Sign out" }).click();
+  await page.locator("#kc-logout").click();
   await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
   expect((await page.request.get("/api/files")).status()).toBe(401);
+
+  await page.getByRole("link", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveTitle(/Cloud Storage/);
+  const back = page.getByRole("link", { name: "Back to Cloud Storage", exact: true });
+  await expect(back).toBeVisible();
+  await back.click();
+  await expect(page).toHaveURL(new URL("/", baseURL).href);
+  await page.getByRole("link", { name: "Sign in", exact: true }).click();
+  const username = page.locator("#username");
+  await expect(username).toBeEditable();
+  await expect(username).toHaveValue("");
+  await username.fill("bob");
+  await page.locator("#password").fill(process.env.CLASS_FIXTURE_PASSWORD);
+  await page.locator("#kc-login").click();
+  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  const { user } = await (await page.request.get("/api/auth/me")).json();
+  expect(user.username).toBe("bob");
+  await expect(page.getByRole("button", { name: privateName, exact: true })).toHaveCount(0);
 });
 
 for (const username of ["dana", "eve"]) {
@@ -114,6 +154,7 @@ test("an employee creates folders, renames and moves items, and retrieves intact
   await page.getByRole("textbox", { name: "Folder name" }).fill(original);
   await page.getByRole("button", { name: "Create folder" }).click();
 
+  await page.getByLabel(`More actions for ${original}`, { exact: true }).click();
   await page.getByRole("button", { name: `Rename ${original}`, exact: true }).click();
   await page.getByRole("textbox", { name: "New name" }).fill(renamed);
   await page.getByRole("button", { name: "Save name" }).click();
@@ -133,13 +174,15 @@ test("an employee creates folders, renames and moves items, and retrieves intact
   expect(file.folderId).toBe(folder.id);
   expect(file.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 
+  await page.getByLabel("More actions for report.pdf", { exact: true }).click();
   await page.getByRole("button", { name: "Rename report.pdf", exact: true }).click();
   await page.getByRole("textbox", { name: "New name" }).fill("quarterly-report.pdf");
   await page.getByRole("button", { name: "Save name" }).click();
   await expect(page.getByRole("link", { name: "Download quarterly-report.pdf" })).toBeVisible();
 
   await page.reload();
-  await page.getByRole("button", { name: renamed, exact: true }).click();
+  await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+  await page.getByLabel("More actions for quarterly-report.pdf", { exact: true }).click();
   await page.getByRole("button", { name: "Move quarterly-report.pdf", exact: true }).click();
   await page.getByLabel("Destination folder").selectOption(target.id);
   await page.getByRole("button", { name: "Move item" }).click();

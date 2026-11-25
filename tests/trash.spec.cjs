@@ -24,7 +24,9 @@ async function signIn(page, username) {
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(password);
   await page.locator("#kc-login").click();
-  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  const heading = username === "it-admin" ? "Operations console"
+    : username === "security-reviewer" ? "Security activity" : "My files";
+  await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
 }
 
 async function createFolder(request, headers, name, parentId = null) {
@@ -104,6 +106,7 @@ test("trash hides a subtree and both share paths, preserves quota, and restores 
     expect(deniedRemoval.status()).toBe(404);
 
     await page.reload();
+    await page.getByLabel(`More actions for ${parent.name}`, { exact: true }).click();
     await page.getByRole("button", { name: `Move ${parent.name} to trash`, exact: true }).click();
     await page.getByRole("dialog", { name: "Move to trash" }).getByRole("button", { name: "Move to trash" }).click();
     await expect(page.getByRole("button", { name: parent.name, exact: true })).toHaveCount(0);

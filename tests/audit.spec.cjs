@@ -21,7 +21,9 @@ async function signIn(context, username) {
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(password);
   await page.locator("#kc-login").click();
-  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  const heading = username === "it-admin" ? "Operations console"
+    : username === "security-reviewer" ? "Security activity" : "My files";
+  await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
   const response = await context.request.get("/api/auth/me");
   expect(response.status()).toBe(200);
   const { user } = await response.json();
@@ -84,6 +86,23 @@ test("a security reviewer sees one attributable record per workflow action, incl
       headers: origin, data: { name: "Wrong owner" },
     });
     expect(denied.status()).toBe(404);
+    const newest = await reviewerContext.request.get(`/api/audit?searchId=${folder.id}&limit=1`);
+    expect(newest.status()).toBe(200);
+    const { events: firstPage } = await newest.json();
+    expect(firstPage).toHaveLength(1);
+    const cursor = newest.headers()["x-audit-next-cursor"];
+    expect(cursor).toBe(firstPage[0].id);
+    const older = await reviewerContext.request.get(`/api/audit?searchId=${folder.id}&limit=1&after=${cursor}`);
+    expect(older.status()).toBe(200);
+    const { events: secondPage } = await older.json();
+    expect(secondPage).toHaveLength(1);
+    expect(secondPage[0].id).not.toBe(cursor);
+    const activity = reviewerContext.pages()[0];
+    await activity.getByRole("searchbox", { name: "Search by ID" }).fill(folder.id);
+    await activity.getByLabel("Outcome", { exact: true }).selectOption("denied");
+    await activity.getByRole("button", { name: "Apply filters" }).click();
+    await expect(activity.getByRole("listitem").filter({ hasText: "Denied" })).toHaveCount(1);
+
 
     const fixturePath = (revision) => path.join(__dirname, "..", "fixtures", "files", `handover-v${revision}.png`);
     const [firstBytes, nextBytes] = await Promise.all([readFile(fixturePath(1)), readFile(fixturePath(2))]);

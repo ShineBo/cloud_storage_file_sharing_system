@@ -266,11 +266,11 @@ export class FilesService {
     });
   }
 
-  async download(ownerId: string, id: string, auditEntry?: AuditAttempt) {
+  async serveOwned(ownerId: string, id: string, action: "view" | "download", auditEntry: AuditAttempt) {
     if (!UUID.test(id)) throw fileNotFound();
     const file = await this.findCurrent(this.database, ownerId, id);
-    if (auditEntry) auditEntry.revision = file.revision;
-    return this.serveAuthorized(file, "download");
+    auditEntry.revision = file.revision;
+    return this.serveAuthorized(file, action);
   }
 
   private async insertRevision(

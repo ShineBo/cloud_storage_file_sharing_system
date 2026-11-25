@@ -28,9 +28,9 @@ async function signIn(context, username, location = "/") {
   return page;
 }
 
-async function signInToWorkspace(context, username) {
+async function signInToHome(context, username, heading) {
   const page = await signIn(context, username);
-  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
 }
 
 async function mailpit(pathname) {
@@ -56,8 +56,8 @@ test("configured access risks notify Security, and the owner sees corrective fee
   const [owner, recipient, outsider, reviewer, inactive] = contexts;
   try {
     await Promise.all([
-      signInToWorkspace(owner, "it-admin"), signInToWorkspace(recipient, "bob"),
-      signInToWorkspace(outsider, "casey"), signInToWorkspace(reviewer, "security-reviewer"),
+      signInToHome(owner, "it-admin", "Operations console"), signInToHome(recipient, "bob", "My files"),
+      signInToHome(outsider, "casey", "My files"), signInToHome(reviewer, "security-reviewer", "Security activity"),
     ]);
     const headers = { origin: baseURL };
     const bytes = await readFile(path.join(__dirname, "fixtures/sample.pdf"));

@@ -106,6 +106,21 @@ export class OidcService {
     return { attempt, authorizationUrl: authorizationUrl.href };
   }
 
+  async browserLogoutUrl() {
+    if (process.env.OIDC_BROWSER_LOGOUT !== "true") return undefined;
+
+    const configuration = await this.getConfiguration();
+    const { issuer, end_session_endpoint: endpoint } = configuration.serverMetadata();
+    const clientId = process.env.OIDC_CLIENT_ID?.trim();
+    if (!clientId || !endpoint || !underIssuer(new URL(endpoint), new URL(issuer))) return undefined;
+
+    return oidc.buildEndSessionUrl(configuration, {
+      client_id: clientId,
+      post_logout_redirect_uri: this.callbackUrl().href,
+      state: "signed-out",
+    }).href;
+  }
+
   async identity(callback: URL, attempt: OidcAttempt) {
     const configuration = await this.getConfiguration();
     let claims: oidc.IDToken | undefined;

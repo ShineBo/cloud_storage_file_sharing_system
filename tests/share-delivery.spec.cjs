@@ -54,9 +54,9 @@ async function signIn(page, username, location = "/") {
   await page.locator("#kc-login").click();
 }
 
-async function signInToWorkspace(page, username) {
+async function signInToHome(page, username, heading) {
   await signIn(page, username);
-  await expect(page.getByRole("heading", { name: "My files" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
 }
 
 async function shareFrom(response, status) {
@@ -81,7 +81,10 @@ test.describe("share email delivery", () => {
     page, browser, request, baseURL,
   }) => {
     test.setTimeout(80_000);
-    await signInToWorkspace(page, "it-admin");
+    await signInToHome(page, "it-admin", "Operations console");
+    await page.getByRole("navigation", { name: "Workspace pages" })
+      .getByRole("link", { name: "My files", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "My files", exact: true })).toBeVisible();
     const bytes = await readFile(path.join(__dirname, "fixtures", "sample.pdf"));
     const name = `Delivery check ${randomUUID().slice(0, 8)}.pdf`;
     const uploaded = await page.request.post(`/api/files?size=${bytes.length}`, {
@@ -165,7 +168,7 @@ test.describe("share email delivery", () => {
 
   test("emails the existing group link once to each current member", async ({ page, request, baseURL }) => {
     test.setTimeout(60_000);
-    await signInToWorkspace(page, "security-reviewer");
+    await signInToHome(page, "security-reviewer", "Security activity");
     const folderResponse = await page.request.post("/api/folders", {
       headers: { origin: baseURL },
       data: { name: `Group delivery ${randomUUID().slice(0, 8)}` },

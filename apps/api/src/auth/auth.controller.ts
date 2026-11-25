@@ -43,6 +43,10 @@ export class AuthController {
   @Get("callback")
   async callback(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
     reply.header("Cache-Control", "no-store").header("Referrer-Policy", "no-referrer");
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size === 1 && params.get("state") === "signed-out") {
+      return reply.redirect("/", 302);
+    }
     try {
       reply.header("Set-Cookie", this.auth.clearLoginCookie());
       const result = await this.auth.finishLogin(request);
@@ -67,7 +71,7 @@ export class AuthController {
   @Get("me")
   @Header("Cache-Control", "no-store")
   async me(@Req() request: FastifyRequest) {
-    return { user: await this.auth.requireUser(request) };
+    return { user: await this.auth.profile(request) };
   }
 
   @Post("logout")
@@ -77,7 +81,8 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
-    const cookies = await this.auth.signOut(request);
+    const { cookies, location } = await this.auth.signOut(request);
     reply.header("Set-Cookie", cookies);
+    if (location) reply.header("X-Sign-Out-Location", location);
   }
 }

@@ -18,6 +18,9 @@ import { LIVE_SHARE_TARGET } from "./live-share-target";
 import { NotificationService, type ShareDelivery } from "../notifications/notification.service";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const DIRECTORY_PAGE_SIZE = 25;
+const DIRECTORY_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+const OUTGOING_STATUSES = ["active", "expired", "revoked", "unavailable"] as const;
 
 // Each share is one link, addressed only to the stored employee or group.
 type ItemType = "file" | "folder";
@@ -46,6 +49,19 @@ type ShareRow = {
 };
 type OwnedShareRow = ShareRow & { recipient_name: string };
 type RecipientShareRow = ShareRow & { owner_name: string; expired: boolean };
+type DirectoryShareRow = Pick<ShareRow, "id" | "permission" | "allow_download" | "expires_at"> & {
+  created_cursor: string;
+  item_id: string;
+  item_type: ItemType;
+  item_name: string;
+};
+type IncomingDirectoryRow = DirectoryShareRow & { owner_name: string; group_name: string | null };
+type OutgoingDirectoryRow = DirectoryShareRow & {
+  recipient_name: string;
+  recipient_type: ShareInput["recipientType"];
+  status: typeof OUTGOING_STATUSES[number];
+  item_live: boolean;
+};
 type FolderRow = { id: string; name: string; parent_id: string | null };
 type FileDetails = StoredBlob & { id: string; revision: number; author_name: string; revised_at: Date };
 type FileRow = FileDetails & { owner_id: string; folder_id: string | null };
@@ -56,6 +72,29 @@ const OWNED_SHARE_SQL = `
   FROM shares AS share
   LEFT JOIN employees AS employee ON employee.id = share.recipient_employee_id
   LEFT JOIN internal_groups AS team ON team.id = share.recipient_group_id
+`;
+
+const RECIPIENT_GROUPS_SQL = `
+  SELECT team.id, team.name
+  FROM internal_group_members AS member
+  JOIN internal_groups AS team ON team.id = member.group_id AND team.approved
+  WHERE member.employee_id = recipient.id AND member.issuer = recipient.issuer
+`;
+
+const DIRECTORY_SHARE_COLUMNS = `
+  share.id, share.permission, share.allow_download, share.expires_at,
+  to_char(share.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_cursor,
+  COALESCE(share.file_id, share.folder_id) AS item_id,
+  CASE WHEN share.file_id IS NOT NULL THEN 'file' ELSE 'folder' END AS item_type,
+  COALESCE(file.original_name, folder.name) AS item_name
+`;
+
+const DIRECTORY_AFTER_CURSOR = `(
+  $2::timestamptz IS NULL OR (share.created_at, share.id) < ($2::timestamptz, $3::uuid)
+)`;
+
+const DIRECTORY_ACTIVE_WINDOW = `
+  share.revoked_at IS NULL AND share.expires_at > statement_timestamp() AND ${DIRECTORY_AFTER_CURSOR}
 `;
 
 @Injectable()
@@ -166,6 +205,98 @@ export class SharesService {
       );
       return this.withDelivery(client, result.rows);
     });
+  }
+
+  async incoming(recipientId: string, cursor: unknown) {
+    const [createdAt, id] = readDirectoryCursor(cursor);
+    const result = await this.database.query<IncomingDirectoryRow>(
+      `WITH recipient AS (
+         SELECT id, issuer FROM employees WHERE id = $1 AND active
+       ), eligible_shares AS (
+         SELECT share.*, NULL::text AS group_name
+         FROM recipient
+         JOIN shares AS share ON share.recipient_employee_id = recipient.id AND share.issuer = recipient.issuer
+         WHERE ${DIRECTORY_ACTIVE_WINDOW}
+         UNION ALL
+         SELECT share.*, team.name AS group_name
+         FROM recipient
+         JOIN LATERAL (${RECIPIENT_GROUPS_SQL}) AS team ON true
+         JOIN shares AS share ON share.recipient_group_id = team.id AND share.issuer = recipient.issuer
+         WHERE ${DIRECTORY_ACTIVE_WINDOW}
+       )
+       SELECT ${DIRECTORY_SHARE_COLUMNS}, sender.display_name AS owner_name, share.group_name
+       FROM eligible_shares AS share
+       JOIN employees AS sender ON sender.id = share.owner_id AND sender.issuer = share.issuer AND sender.active
+       LEFT JOIN current_files AS file ON file.id = share.file_id AND file.owner_id = share.owner_id
+       LEFT JOIN folders AS folder ON folder.id = share.folder_id AND folder.owner_id = share.owner_id
+         AND folder.trash_id IS NULL
+       WHERE file.id IS NOT NULL OR folder.id IS NOT NULL
+       ORDER BY share.created_at DESC, share.id DESC
+       LIMIT $4`,
+      [recipientId, createdAt, id, DIRECTORY_PAGE_SIZE + 1],
+    );
+    const { entries, nextCursor } = directoryPage(result.rows);
+    return {
+      shares: entries.map((row) => ({
+        ...toDirectoryShare(row),
+        link: `/shared/${row.id}`,
+        ownerName: row.owner_name,
+        groupName: row.group_name,
+      })),
+      nextCursor,
+    };
+  }
+
+  async outgoing(ownerId: string, cursor: unknown, status: unknown) {
+    const [createdAt, id] = readDirectoryCursor(cursor);
+    if (status !== undefined && !OUTGOING_STATUSES.some((value) => value === status)) {
+      throw new BadRequestException("Choose an available shared link status.");
+    }
+    const result = await this.database.query<OutgoingDirectoryRow>(
+      `SELECT ${DIRECTORY_SHARE_COLUMNS}, COALESCE(employee.display_name, team.name) AS recipient_name,
+         CASE WHEN share.recipient_employee_id IS NOT NULL THEN 'employee' ELSE 'group' END AS recipient_type,
+         target.live AS item_live, access.status
+       FROM shares AS share
+       JOIN employees AS sender ON sender.id = share.owner_id AND sender.issuer = share.issuer AND sender.active
+       LEFT JOIN files AS file ON file.id = share.file_id AND file.owner_id = share.owner_id
+       LEFT JOIN folders AS folder ON folder.id = share.folder_id AND folder.owner_id = share.owner_id
+       LEFT JOIN employees AS employee ON employee.id = share.recipient_employee_id AND employee.issuer = share.issuer
+       LEFT JOIN internal_groups AS team ON team.id = share.recipient_group_id AND team.issuer = share.issuer
+       CROSS JOIN LATERAL (
+         SELECT (file.id IS NOT NULL AND file.trash_id IS NULL)
+           OR (folder.id IS NOT NULL AND folder.trash_id IS NULL) AS live
+       ) AS target
+       CROSS JOIN LATERAL (
+         SELECT CASE
+           WHEN share.revoked_at IS NOT NULL THEN 'revoked'
+           WHEN share.expires_at <= statement_timestamp() THEN 'expired'
+           WHEN NOT target.live THEN 'unavailable'
+           WHEN employee.active OR (team.approved AND EXISTS (
+             SELECT 1 FROM internal_group_members AS member
+             JOIN employees AS candidate ON candidate.id = member.employee_id
+               AND candidate.issuer = member.issuer AND candidate.active
+             WHERE member.group_id = team.id AND member.issuer = share.issuer
+           )) THEN 'active'
+           ELSE 'unavailable'
+         END AS status
+       ) AS access
+       WHERE share.owner_id = $1 AND ${DIRECTORY_AFTER_CURSOR}
+         AND ($4::text IS NULL OR access.status = $4::text)
+       ORDER BY share.created_at DESC, share.id DESC
+       LIMIT $5`,
+      [ownerId, createdAt, id, status ?? null, DIRECTORY_PAGE_SIZE + 1],
+    );
+    const { entries, nextCursor } = directoryPage(result.rows);
+    return {
+      shares: entries.map((row) => ({
+        ...toDirectoryShare(row),
+        recipientName: row.recipient_name,
+        recipientType: row.recipient_type,
+        status: row.status,
+        canManage: row.item_live,
+      })),
+      nextCursor,
+    };
   }
 
   async revoke(ownerId: string, id: string, event: AuditAttempt) {
@@ -342,15 +473,11 @@ export class SharesService {
     const share = (await client.query<RecipientShareRow>(
       `SELECT share.*, sender.display_name AS owner_name, share.expires_at <= clock_timestamp() AS expired
        FROM shares AS share
-       JOIN employees AS sender ON sender.id = share.owner_id AND sender.active
+       JOIN employees AS sender ON sender.id = share.owner_id AND sender.issuer = share.issuer AND sender.active
        JOIN employees AS recipient
          ON recipient.id = $2 AND recipient.issuer = share.issuer AND recipient.active
        WHERE share.id = $1 AND ${LIVE_SHARE_TARGET} AND (
-         share.recipient_employee_id = recipient.id OR EXISTS (
-           SELECT 1 FROM internal_group_members AS member
-           JOIN internal_groups AS team ON team.id = member.group_id AND team.approved
-           WHERE team.id = share.recipient_group_id AND member.employee_id = recipient.id
-         )
+         share.recipient_employee_id = recipient.id OR EXISTS (${RECIPIENT_GROUPS_SQL} AND team.id = share.recipient_group_id)
        )`,
       [id, recipientId],
     )).rows[0];
@@ -425,6 +552,38 @@ function readItemReference(itemType: unknown, itemId: unknown): ItemReference {
   const message = "Choose a file or folder in your workspace.";
   if (itemType !== "file" && itemType !== "folder") throw new BadRequestException(message);
   return { itemType, itemId: readUuid(itemId, message) };
+}
+
+function readDirectoryCursor(value: unknown) {
+  if (value === undefined) return [null, null] as const;
+  const message = "Refresh the shared links list before loading more links.";
+  if (typeof value !== "string" || value.length !== 64) throw new BadRequestException(message);
+  const [createdAt, id] = value.split("~");
+  if (!DIRECTORY_TIMESTAMP.test(createdAt) || createdAt.startsWith("0000-") || !UUID.test(id)) {
+    throw new BadRequestException(message);
+  }
+  const timestamp = new Date(createdAt);
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== `${createdAt.slice(0, 23)}Z`) {
+    throw new BadRequestException(message);
+  }
+  return [createdAt, id] as const;
+}
+
+function directoryPage<Row extends DirectoryShareRow>(rows: Row[]) {
+  const entries = rows.slice(0, DIRECTORY_PAGE_SIZE);
+  const last = entries.at(-1);
+  const nextCursor = rows.length > DIRECTORY_PAGE_SIZE && last ? `${last.created_cursor}~${last.id}` : null;
+  return { entries, nextCursor };
+}
+
+function toDirectoryShare(row: DirectoryShareRow) {
+  return {
+    id: row.id,
+    item: { id: row.item_id, type: row.item_type, name: row.item_name },
+    permission: row.permission,
+    allowDownload: row.allow_download,
+    expiresAt: row.expires_at.toISOString(),
+  };
 }
 
 function readUuid(value: unknown, message: string) {

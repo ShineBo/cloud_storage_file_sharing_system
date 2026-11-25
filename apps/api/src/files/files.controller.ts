@@ -86,14 +86,27 @@ export class FilesController {
     }, null);
   }
 
+  @Get(":id/view")
+  @Header("Cache-Control", "private, no-store")
+  @Header("Referrer-Policy", "no-referrer")
+  @Header("X-Content-Type-Options", "nosniff")
+  @Header("X-Frame-Options", "SAMEORIGIN")
+  async view(@Req() request: FastifyRequest, @Param("id") id: string) {
+    return this.serveOwnedFile(request, id, "view");
+  }
+
   @Get(":id/download")
   @Header("Cache-Control", "private, no-store")
   @Header("X-Content-Type-Options", "nosniff")
   async download(@Req() request: FastifyRequest, @Param("id") id: string) {
-    return this.audit.run({ action: "download", actorId: null, itemType: "file", itemId: id }, async (event) => {
+    return this.serveOwnedFile(request, id, "download");
+  }
+
+  private serveOwnedFile(request: FastifyRequest, id: string, action: "view" | "download") {
+    return this.audit.run({ action, actorId: null, itemType: "file", itemId: id }, async (event) => {
       const user = await this.auth.requireUser(request);
       event.actorId = user.id;
-      return this.files.download(user.id, id, event);
+      return this.files.serveOwned(user.id, id, action, event);
     });
   }
 }
