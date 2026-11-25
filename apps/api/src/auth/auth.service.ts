@@ -5,7 +5,7 @@ import {
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { DatabaseService } from "../database.service";
-import { authCookie, hashAuthToken, newAuthToken, readAuthCookie } from "./auth-cookies";
+import { authCookie, hashAuthToken, matchesLogoutAttempt, newAuthToken, newLogoutAttempt, readAuthCookie } from "./auth-cookies";
 import { OidcService, type OidcAttempt } from "./oidc.service";
 
 const LOGIN_MAX_AGE = 10 * 60;
@@ -181,21 +181,47 @@ export class AuthService {
     this.requireSameOrigin(request);
     const secure = this.oidc.secureCookies;
     const session = readAuthCookie(request, "se_session", secure);
-    const attempt = readAuthCookie(request, "se_login_attempt", secure);
-
-    if (session || attempt) {
-      await this.database.query(
-        `
-          WITH discarded AS (
-            DELETE FROM oidc_login_attempts WHERE token_hash = $2
-          )
-          DELETE FROM auth_sessions WHERE token_hash = $1
-        `,
-        [session ? hashAuthToken(session) : null, attempt ? hashAuthToken(attempt) : null],
-      );
+    if (session) {
+      const pending = newLogoutAttempt(session, secure);
+      const location = await this.oidc.browserLogoutUrl(pending.state).catch(() => undefined);
+      if (location) return { location, cookies: [pending.cookie] };
     }
 
-    const location = session ? await this.oidc.browserLogoutUrl().catch(() => undefined) : undefined;
-    return { location, cookies: [authCookie("se_session", "", 0, secure), this.clearLoginCookie()] };
+    await this.endLocalSession(request, secure, session);
+    return { cookies: this.clearedSessionCookies(secure), location: undefined };
+  }
+
+  async finishSignOut(request: FastifyRequest, state: string) {
+    const secure = this.oidc.secureCookies;
+    const session = readAuthCookie(request, "se_session", secure);
+    if (!session || !matchesLogoutAttempt(request, state, session, secure)) return undefined;
+    if (await this.endLocalSession(request, secure, session, true)) return this.clearedSessionCookies(secure);
+  }
+
+  private clearedSessionCookies(secure: boolean) {
+    return [
+      authCookie("se_session", "", 0, secure),
+      this.clearLoginCookie(),
+      authCookie("se_logout_attempt", "", 0, secure),
+    ];
+  }
+
+  private async endLocalSession(request: FastifyRequest, secure: boolean, session?: string, confirmed = false) {
+    const attempt = readAuthCookie(request, "se_login_attempt", secure);
+    if (!session && !attempt) return false;
+
+    const { rows } = await this.database.query<{ ended: boolean }>(
+      `
+        WITH ended AS (
+          DELETE FROM auth_sessions WHERE token_hash = $1 RETURNING 1
+        ), discarded AS (
+          DELETE FROM oidc_login_attempts
+          WHERE token_hash = $2 AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM ended))
+        )
+        SELECT EXISTS (SELECT 1 FROM ended) AS ended
+      `,
+      [session ? hashAuthToken(session) : null, attempt ? hashAuthToken(attempt) : null, confirmed],
+    );
+    return rows[0].ended;
   }
 }

@@ -148,7 +148,7 @@ export function AppShell({
               <span>{roles}</span>
             </div>
             <button className="button button-secondary shell-signout" type="button" disabled={locked} onClick={signOut}>
-              {signingOut ? "Signing out…" : "Sign out"}
+              {signingOut ? "Opening sign-out…" : "Sign out"}
             </button>
           </div>
         </header>

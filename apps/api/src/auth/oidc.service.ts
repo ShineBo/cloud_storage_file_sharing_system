@@ -106,7 +106,7 @@ export class OidcService {
     return { attempt, authorizationUrl: authorizationUrl.href };
   }
 
-  async browserLogoutUrl() {
+  async browserLogoutUrl(state: string) {
     if (process.env.OIDC_BROWSER_LOGOUT !== "true") return undefined;
 
     const configuration = await this.getConfiguration();
@@ -117,7 +117,7 @@ export class OidcService {
     return oidc.buildEndSessionUrl(configuration, {
       client_id: clientId,
       post_logout_redirect_uri: this.callbackUrl().href,
-      state: "signed-out",
+      state,
     }).href;
   }
 

@@ -1,0 +1,51 @@
+name: cloud-storage-demo
+
+services:
+  db:
+    environment:
+      POSTGRES_DB: cloud_storage_demo
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cloud_storage", "-d", "cloud_storage_demo"]
+
+  identity:
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: !reset null
+      KC_BOOTSTRAP_ADMIN_PASSWORD: !reset null
+      DEMO_MAYA_PASSWORD: ${DEMO_MAYA_PASSWORD:?Run node scripts/demo-config.mjs and use --env-file .env.demo}
+      DEMO_LEO_PASSWORD: ${DEMO_LEO_PASSWORD:?Run node scripts/demo-config.mjs and use --env-file .env.demo}
+      DEMO_JORDAN_PASSWORD: ${DEMO_JORDAN_PASSWORD:?Run node scripts/demo-config.mjs and use --env-file .env.demo}
+      DEMO_NORA_PASSWORD: ${DEMO_NORA_PASSWORD:?Run node scripts/demo-config.mjs and use --env-file .env.demo}
+      DEMO_SAM_PASSWORD: ${DEMO_SAM_PASSWORD:?Run node scripts/demo-config.mjs and use --env-file .env.demo}
+    volumes:
+      - type: bind
+        source: ./fixtures/keycloak/northstar-demo-realm.json
+        target: /opt/keycloak/data/import/se-final-class-realm.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+  migrate:
+    image: cloud-storage-demo:local
+    command: ["node", "scripts/migrate.mjs", "--northstar-demo-fixtures"]
+    environment:
+      PGDATABASE: cloud_storage_demo
+
+  api:
+    image: cloud-storage-demo:local
+    environment:
+      PGDATABASE: cloud_storage_demo
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_TLS: plain
+      SMTP_FROM: files@northstar.example.test
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SECURITY_ALERT_TO: sam@northstar.example.test
+      SECURITY_ALERT_RULES: denied-shared-access,inactive-share-access
+
+  web:
+    image: cloud-storage-demo:local
+
+  mailpit:
+    environment:
+      MP_ENABLE_CHAOS: "false"

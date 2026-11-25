@@ -1,0 +1,84 @@
+{
+  "realm": "se-final-class",
+  "displayName": "Northstar Field Services",
+  "displayNameHtml": "Northstar Field Services",
+  "loginTheme": "cloud-storage",
+  "enabled": true,
+  "rememberMe": false,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "groups": [
+    { "name": "Riverside Site Team" },
+    { "name": "Regional Dispatch" }
+  ],
+  "users": [
+    {
+      "username": "maya",
+      "firstName": "Maya",
+      "lastName": "Chen",
+      "email": "maya@northstar.example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "647a5d32-0ce6-432a-84a4-67c0167cc001",
+      "groups": ["/Riverside Site Team"],
+      "credentials": [{ "type": "password", "value": "${DEMO_MAYA_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "leo",
+      "firstName": "Leo",
+      "lastName": "Rivera",
+      "email": "leo@northstar.example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "647a5d32-0ce6-432a-84a4-67c0167cc002",
+      "groups": ["/Riverside Site Team"],
+      "credentials": [{ "type": "password", "value": "${DEMO_LEO_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "jordan",
+      "firstName": "Jordan",
+      "lastName": "Ellis",
+      "email": "jordan@northstar.example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "647a5d32-0ce6-432a-84a4-67c0167cc003",
+      "groups": ["/Regional Dispatch"],
+      "credentials": [{ "type": "password", "value": "${DEMO_JORDAN_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "nora",
+      "firstName": "Nora",
+      "lastName": "Patel",
+      "email": "nora@northstar.example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "647a5d32-0ce6-432a-84a4-67c0167cc004",
+      "credentials": [{ "type": "password", "value": "${DEMO_NORA_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "sam",
+      "firstName": "Sam",
+      "lastName": "Reed",
+      "email": "sam@northstar.example.test",
+      "enabled": true,
+      "emailVerified": true,
+      "id": "647a5d32-0ce6-432a-84a4-67c0167cc005",
+      "credentials": [{ "type": "password", "value": "${DEMO_SAM_PASSWORD}", "temporary": false }]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "cloud-storage",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${CLASS_OIDC_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["${CLASS_APP_ORIGIN}/api/auth/callback"],
+      "attributes": { "pkce.code.challenge.method": "S256" }
+    }
+  ]
+}

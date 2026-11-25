@@ -86,8 +86,29 @@ test("an employee can upload and download privately, and sign out", async ({ pag
     multipart: { file: { name: "unsupported.txt", mimeType: "text/plain", buffer: Buffer.from("Synthetic test file.") } },
   });
   expect(unsupported.status()).toBe(415);
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await page.locator("#kc-logout").click();
+  const signOut = page.getByRole("button", { name: "Sign out", exact: true });
+  const confirmSignOut = page.locator("#kc-logout");
+  const backToWorkspace = page.getByRole("link", { name: "Back to Cloud Storage", exact: true });
+  await signOut.click();
+  await expect(confirmSignOut).toBeVisible();
+  const cancelledState = new URL(page.url()).searchParams.get("state");
+  expect(cancelledState).toMatch(/^logout\.[A-Za-z0-9_-]{43}$/);
+  expect((await page.request.get("/api/auth/me")).status()).toBe(200);
+  await backToWorkspace.click();
+  await expect(page.getByRole("heading", { name: "My files", exact: true })).toBeVisible();
+  const { user: retainedUser } = await (await page.request.get("/api/auth/me")).json();
+  expect(retainedUser.username).toBe("alice");
+  await expect(page.getByRole("button", { name: privateName, exact: true })).toBeVisible();
+
+  await signOut.click();
+  await expect(confirmSignOut).toBeVisible();
+  const confirmedState = new URL(page.url()).searchParams.get("state");
+  expect(confirmedState).toMatch(/^logout\.[A-Za-z0-9_-]{43}$/);
+  expect(confirmedState).not.toBe(cancelledState);
+  const callback = (state) => page.request.get(`/api/auth/callback?${new URLSearchParams({ state })}`, { maxRedirects: 0 });
+  expect((await callback(cancelledState)).status()).toBe(302);
+  expect((await page.request.get("/api/auth/me")).status()).toBe(200);
+  await confirmSignOut.click();
   await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
   expect((await page.request.get("/api/files")).status()).toBe(401);
 
@@ -108,6 +129,8 @@ test("an employee can upload and download privately, and sign out", async ({ pag
   const { user } = await (await page.request.get("/api/auth/me")).json();
   expect(user.username).toBe("bob");
   await expect(page.getByRole("button", { name: privateName, exact: true })).toHaveCount(0);
+  expect((await callback(confirmedState)).status()).toBe(302);
+  expect((await (await page.request.get("/api/auth/me")).json()).user.username).toBe("bob");
 });
 
 for (const username of ["dana", "eve"]) {

@@ -12,6 +12,7 @@ import {
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AuditService } from "../audit/audit.service";
 import { SharesService } from "../shares/shares.service";
+import { logoutStatePrefix } from "./auth-cookies";
 import { AuthService, shareLoginPath } from "./auth.service";
 
 @Controller("auth")
@@ -44,6 +45,18 @@ export class AuthController {
   async callback(@Req() request: FastifyRequest, @Res() reply: FastifyReply) {
     reply.header("Cache-Control", "no-store").header("Referrer-Policy", "no-referrer");
     const params = new URL(request.url, "http://localhost").searchParams;
+    const state = params.getAll("state").find((value) => value.startsWith(logoutStatePrefix));
+    if (state) {
+      if (params.size === 1) {
+        try {
+          const cookies = await this.auth.finishSignOut(request, state);
+          if (cookies) reply.header("Set-Cookie", cookies);
+        } catch {
+          this.logger.warn("Could not complete sign-out.");
+        }
+      }
+      return reply.redirect("/", 302);
+    }
     if (params.size === 1 && params.get("state") === "signed-out") {
       return reply.redirect("/", 302);
     }

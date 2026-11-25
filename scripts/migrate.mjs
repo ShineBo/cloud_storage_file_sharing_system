@@ -4,63 +4,78 @@ import pg from "pg";
 
 const { Client } = pg;
 const migrations = new URL("../apps/api/migrations/", import.meta.url);
+const classFixtures = process.argv.includes("--class-fixtures");
+const demoFixtures = process.argv.includes("--northstar-demo-fixtures");
 
-async function seedClassDirectory(db) {
-  if (!process.env.OIDC_ISSUER) throw new Error("OIDC_ISSUER is required to seed the demo directory.");
+if (classFixtures && demoFixtures) throw new Error("Choose one directory fixture set.");
+if (demoFixtures && (process.env.PGDATABASE !== "cloud_storage_demo" || process.env.DATABASE_URL
+    || process.env.OIDC_ISSUER !== "http://localhost:18088/realms/se-final-class")) {
+  throw new Error("Use the isolated demo database and issuer to load Northstar fixtures.");
+}
 
-  const file = new URL("../fixtures/keycloak/se-final-class-realm.json", import.meta.url);
-  const { users } = JSON.parse(await readFile(file, "utf8"));
+async function seedDirectory(db) {
+  const issuer = process.env.OIDC_ISSUER;
+  if (!issuer) throw new Error("OIDC_ISSUER is required to seed the demo directory.");
+
+  const filename = demoFixtures ? "northstar-demo-realm.json" : "se-final-class-realm.json";
+  const file = new URL(`../fixtures/keycloak/${filename}`, import.meta.url);
+  const { users, groups } = JSON.parse(await readFile(file, "utf8"));
   for (const user of users) {
-    if (user.username === "eve") continue;
+    if (classFixtures && user.username === "eve") continue;
 
-    const eligible = user.username !== "dana";
+    const eligible = !classFixtures || user.username !== "dana";
     await db.query(
       `INSERT INTO employees (id, issuer, subject, username, display_name, active, notification_email, directory_eligible)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $6)
        ON CONFLICT (issuer, subject) DO UPDATE
        SET notification_email = EXCLUDED.notification_email
        WHERE employees.notification_email IS NULL`,
-      [randomUUID(), process.env.OIDC_ISSUER, user.id, user.username,
+      [randomUUID(), issuer, user.id, user.username,
         `${user.firstName} ${user.lastName}`, eligible, user.email ?? null],
     );
   }
 
-  const policyAdmin = users.find(({ username }) => username === "it-admin");
+  const policyAdmin = users.find(({ username }) => username === (demoFixtures ? "nora" : "it-admin"));
   if (policyAdmin) {
     await db.query(
       `INSERT INTO policy_admins (employee_id)
        SELECT id FROM employees WHERE issuer = $1 AND subject = $2
        ON CONFLICT DO NOTHING`,
-      [process.env.OIDC_ISSUER, policyAdmin.id],
+      [issuer, policyAdmin.id],
     );
   }
 
-  const securityReviewer = users.find(({ username }) => username === "security-reviewer");
+  const securityReviewer = users.find(({ username }) => username === (demoFixtures ? "sam" : "security-reviewer"));
   if (securityReviewer) {
     await db.query(
       `INSERT INTO audit_reviewers (employee_id)
        SELECT id FROM employees WHERE issuer = $1 AND subject = $2
        ON CONFLICT DO NOTHING`,
-      [process.env.OIDC_ISSUER, securityReviewer.id],
+      [issuer, securityReviewer.id],
     );
   }
 
-  const createdGroup = await db.query(
-    `INSERT INTO internal_groups (id, issuer, name, approved)
-     VALUES ($1, $2, 'Design Team', true)
-     ON CONFLICT (issuer, name) DO NOTHING
-     RETURNING id`,
-    [randomUUID(), process.env.OIDC_ISSUER],
-  );
-  const group = createdGroup.rows[0];
-  if (group) {
-    const memberSubjects = users.filter(({ username }) => username === "bob" || username === "priya")
-      .map(({ id }) => id);
-    await db.query(
-      `INSERT INTO internal_group_members (issuer, group_id, employee_id)
-       SELECT issuer, $2, id FROM employees WHERE issuer = $1 AND subject = ANY($3::text[])`,
-      [process.env.OIDC_ISSUER, group.id, memberSubjects],
+  const directoryGroups = demoFixtures ? groups.map(({ name }) => ({
+    name, memberSubjects: users.filter((user) => user.groups?.includes(`/${name}`)).map(({ id }) => id),
+  })) : [{
+    name: "Design Team",
+    memberSubjects: users.filter(({ username }) => username === "bob" || username === "priya").map(({ id }) => id),
+  }];
+  for (const { name, memberSubjects } of directoryGroups) {
+    const { rows: [group] } = await db.query(
+      `INSERT INTO internal_groups (id, issuer, name, approved)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT (issuer, name) DO NOTHING
+       RETURNING id`,
+      [randomUUID(), issuer, name],
     );
+    if (group) {
+      await db.query(
+        `INSERT INTO internal_group_members (issuer, group_id, employee_id)
+         SELECT issuer, $2, id FROM employees WHERE issuer = $1 AND subject = ANY($3::text[])`,
+        [issuer, group.id, memberSubjects],
+      );
+    }
   }
 }
 
@@ -80,7 +95,7 @@ try {
     await db.query("INSERT INTO schema_migrations (name) VALUES ($1)", [name]);
   }
 
-  if (process.argv.includes("--class-fixtures")) await seedClassDirectory(db);
+  if (classFixtures || demoFixtures) await seedDirectory(db);
   await db.query("COMMIT");
   console.log("Database migrations are ready.");
 } catch (error) {
